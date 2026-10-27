@@ -39,7 +39,7 @@ class GearBoxTest {
 
         @Test
         @DisplayName("Initial gear should always be PARK (P)")
-        void shouldInitializeInParkGear() {
+        void shouldInitializeInParkGear_whenGearBoxIsCreated() {
             assertEquals(GearBox.Gear.P, gearBox.getCurrentGear(),
                     "GearBox must default to P (Park) upon initialization");
         }
@@ -151,7 +151,7 @@ class GearBoxTest {
 
         @ParameterizedTest(name = "Shift R -> N at speed {0} km/h should succeed")
         @ValueSource(doubles = {ZERO_SPEED_KMH, LOW_SPEED_KMH, HIGH_SPEED_KMH, CRUISE_SPEED_KMH})
-        void shouldAllowShiftFromReverseToNeutral_atAnyValidSpeed(double speed) {
+        void shouldAllowShiftFromReverseToNeutral_whenSpeedIsValid(double speed) {
             transitionTo(GearBox.Gear.R);
             speedSensor.setSpeedKmh(speed);
 
@@ -163,7 +163,7 @@ class GearBoxTest {
 
         @ParameterizedTest(name = "Shift N -> D at speed {0} km/h should succeed")
         @ValueSource(doubles = {ZERO_SPEED_KMH, LOW_SPEED_KMH, HIGH_SPEED_KMH, CRUISE_SPEED_KMH})
-        void shouldAllowShiftFromNeutralToDrive_atAnyValidSpeed(double speed) {
+        void shouldAllowShiftFromNeutralToDrive_whenSpeedIsValid(double speed) {
             transitionTo(GearBox.Gear.N);
             speedSensor.setSpeedKmh(speed);
 
@@ -190,26 +190,28 @@ class GearBoxTest {
                     "Exception message must specify invalid transition from P to R");
         }
 
-        @ParameterizedTest(name = "Shift R -> D at speed {0} km/h (> 0.0) should throw IllegalGearChangeException")
-        @ValueSource(doubles = {0.01, 1.0, 5.0, HIGH_SPEED_KMH})
-        void shouldDisallowShiftFromReverseToDrive_whenVehicleIsNotStationary(double nonZeroSpeed) {
-            transitionTo(GearBox.Gear.R);
-            speedSensor.setSpeedKmh(nonZeroSpeed);
+        @ParameterizedTest(name = "Shift {0} -> {1} must be rejected at nonzero speeds")
+        @CsvSource({"R, D", "D, R"})
+        void shouldRejectReverseDriveShift_whenVehicleIsNotStationary(GearBox.Gear fromGear,
+                                                                      GearBox.Gear targetGear) {
+            transitionTo(fromGear);
+            double nearZeroSpeed = 0.01;
+            double lowSpeed = 1.0;
+            double reverseLimitSpeed = 5.0;
 
+            speedSensor.setSpeedKmh(nearZeroSpeed);
             IllegalGearChangeException exception = assertThrows(IllegalGearChangeException.class,
-                    () -> gearBox.changeTo(GearBox.Gear.D));
-            assertTrue(exception.getMessage().contains("Cannot change from R to D"));
-        }
+                    () -> gearBox.changeTo(targetGear));
+            assertTrue(exception.getMessage().contains("Cannot change from " + fromGear + " to " + targetGear));
+            assertEquals(fromGear, gearBox.getCurrentGear());
 
-        @ParameterizedTest(name = "Shift D -> R at speed {0} km/h (> 0.0) should throw IllegalGearChangeException")
-        @ValueSource(doubles = {0.01, 1.0, 5.0, HIGH_SPEED_KMH})
-        void shouldDisallowShiftFromDriveToReverse_whenVehicleIsNotStationary(double nonZeroSpeed) {
-            transitionTo(GearBox.Gear.D);
-            speedSensor.setSpeedKmh(nonZeroSpeed);
-
-            IllegalGearChangeException exception = assertThrows(IllegalGearChangeException.class,
-                    () -> gearBox.changeTo(GearBox.Gear.R));
-            assertTrue(exception.getMessage().contains("Cannot change from D to R"));
+            speedSensor.setSpeedKmh(lowSpeed);
+            assertThrows(IllegalGearChangeException.class, () -> gearBox.changeTo(targetGear));
+            speedSensor.setSpeedKmh(reverseLimitSpeed);
+            assertThrows(IllegalGearChangeException.class, () -> gearBox.changeTo(targetGear));
+            speedSensor.setSpeedKmh(HIGH_SPEED_KMH);
+            assertThrows(IllegalGearChangeException.class, () -> gearBox.changeTo(targetGear));
+            assertEquals(fromGear, gearBox.getCurrentGear());
         }
 
         @ParameterizedTest(name = "Direct invalid transition from {0} to {1} at speed {2} km/h should be rejected")
@@ -223,7 +225,7 @@ class GearBoxTest {
                 "D, N, 0.0",
                 "D, N, 50.0"
         })
-        void shouldDisallowUnsupportedTransitions(GearBox.Gear fromGear, GearBox.Gear targetGear, double speed) {
+        void shouldDisallowUnsupportedTransitions_whenRequestedTransitionIsNotAllowed(GearBox.Gear fromGear, GearBox.Gear targetGear, double speed) {
             transitionTo(fromGear);
             speedSensor.setSpeedKmh(speed);
 

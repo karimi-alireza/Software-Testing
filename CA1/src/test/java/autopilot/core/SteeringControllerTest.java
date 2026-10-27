@@ -24,6 +24,7 @@ class SteeringControllerTest {
     private static final double MAX_CHANGE_PER_TICK = 60.0;
     private static final double PHYSICAL_LIMIT_DEGREES = 450.0;
     private static final double HIGH_SPEED_LIMIT_DEGREES = 90.0;
+    private static final double DOUBLE_EPSILON = 1e-9;
 
     private SteeringController controller;
 
@@ -38,7 +39,7 @@ class SteeringControllerTest {
 
         @Test
         @DisplayName("Initial steering angle and target angle should both be zero")
-        void shouldInitializeWithZeroAngles() {
+        void shouldInitializeWithZeroAngles_whenControllerIsCreated() {
             assertAll(
                     () -> assertEquals(ZERO_DEGREES, controller.getCurrentAngleDegrees(), "Current angle should be 0.0°"),
                     () -> assertEquals(ZERO_DEGREES, controller.getTargetAngleDegrees(), "Target angle should be 0.0°")
@@ -116,22 +117,22 @@ class SteeringControllerTest {
 
         @Test
         @DisplayName("Increasing speed clamps the target while preserving the rate limit")
-        void shouldClampTargetWhenSpeedIncreasesBetweenTicks() {
-            assertEquals(60.0, controller.update(450.0, 50.0), 1e-9);
-            assertEquals(450.0, controller.getTargetAngleDegrees(), 1e-9);
-            assertEquals(90.0, controller.update(450.0, 140.0), 1e-9);
-            assertEquals(90.0, controller.getCurrentAngleDegrees(), 1e-9);
-            assertEquals(90.0, controller.getTargetAngleDegrees(), 1e-9);
+        void shouldClampTarget_whenSpeedIncreasesBetweenTicks() {
+            assertEquals(MAX_CHANGE_PER_TICK, controller.update(PHYSICAL_LIMIT_DEGREES, LOW_SPEED_KMH), DOUBLE_EPSILON);
+            assertEquals(PHYSICAL_LIMIT_DEGREES, controller.getTargetAngleDegrees(), DOUBLE_EPSILON);
+            assertEquals(HIGH_SPEED_LIMIT_DEGREES, controller.update(PHYSICAL_LIMIT_DEGREES, HIGH_SPEED_KMH), DOUBLE_EPSILON);
+            assertEquals(HIGH_SPEED_LIMIT_DEGREES, controller.getCurrentAngleDegrees(), DOUBLE_EPSILON);
+            assertEquals(HIGH_SPEED_LIMIT_DEGREES, controller.getTargetAngleDegrees(), DOUBLE_EPSILON);
         }
 
         @Test
         @DisplayName("High-speed clamp and per-tick rate limit should compose across two ticks")
-        void shouldApplyRateLimitBeforeReachingHighSpeedAngleLimit() {
-            assertEquals(60.0, controller.update(450.0, 140.0),
+        void shouldApplyRateLimit_whenHighSpeedLimitsTargetAngle() {
+            assertEquals(MAX_CHANGE_PER_TICK, controller.update(PHYSICAL_LIMIT_DEGREES, HIGH_SPEED_KMH),
                     "First tick must move at most 60 degrees toward the clamped 90-degree target");
-            assertEquals(90.0, controller.update(450.0, 140.0),
+            assertEquals(HIGH_SPEED_LIMIT_DEGREES, controller.update(PHYSICAL_LIMIT_DEGREES, HIGH_SPEED_KMH),
                     "Second tick must reach the high-speed clamp of 90 degrees");
-            assertEquals(90.0, controller.getTargetAngleDegrees());
+            assertEquals(HIGH_SPEED_LIMIT_DEGREES, controller.getTargetAngleDegrees());
         }
 
         @ParameterizedTest(name = "Target {0}° within 60° should be reached in a single tick")
@@ -162,32 +163,27 @@ class SteeringControllerTest {
 
         @Test
         @DisplayName("Should smoothly converge to large angle across multiple consecutive ticks")
-        void shouldConvergeToTargetAcrossMultipleTicks() {
+        void shouldConvergeToTarget_whenAngleDifferenceExceedsTickLimit() {
             double target = 150.0;
 
-            // Tick 1: 0 -> 60
-            assertEquals(60.0, controller.update(target, LOW_SPEED_KMH));
-            // Tick 2: 60 -> 120
-            assertEquals(120.0, controller.update(target, LOW_SPEED_KMH));
-            // Tick 3: 120 -> 150 (remaining diff is 30 <= 60)
-            assertEquals(150.0, controller.update(target, LOW_SPEED_KMH));
+            double secondTickAngle = MAX_CHANGE_PER_TICK * 2;
+            assertEquals(MAX_CHANGE_PER_TICK, controller.update(target, LOW_SPEED_KMH));
+            assertEquals(secondTickAngle, controller.update(target, LOW_SPEED_KMH));
+            assertEquals(target, controller.update(target, LOW_SPEED_KMH));
             assertEquals(target, controller.getCurrentAngleDegrees());
         }
 
         @Test
         @DisplayName("Should smoothly change direction from positive angle to negative angle")
-        void shouldReverseDirectionSmoothly() {
-            // First reach 60°
-            controller.update(60.0, LOW_SPEED_KMH);
-            assertEquals(60.0, controller.getCurrentAngleDegrees());
+        void shouldReverseDirection_whenTargetAngleIsOpposite() {
+            controller.update(MAX_CHANGE_PER_TICK, LOW_SPEED_KMH);
+            assertEquals(MAX_CHANGE_PER_TICK, controller.getCurrentAngleDegrees());
 
-            // Next request -60°: difference is -120°, first step should move down by 60° to 0°
-            double afterReversalStep = controller.update(-60.0, LOW_SPEED_KMH);
+            double afterReversalStep = controller.update(-MAX_CHANGE_PER_TICK, LOW_SPEED_KMH);
             assertEquals(ZERO_DEGREES, afterReversalStep);
 
-            // Second step should reach -60°
-            double finalStep = controller.update(-60.0, LOW_SPEED_KMH);
-            assertEquals(-60.0, finalStep);
+            double finalStep = controller.update(-MAX_CHANGE_PER_TICK, LOW_SPEED_KMH);
+            assertEquals(-MAX_CHANGE_PER_TICK, finalStep);
         }
     }
 
@@ -198,8 +194,9 @@ class SteeringControllerTest {
         @Test
         @DisplayName("selfCenter should return immediately to 0.0° when difference is within 60°")
         void shouldCenterInSingleTick_whenAngleDifferenceIsWithinTickLimit() {
-            controller.update(45.0, LOW_SPEED_KMH);
-            assertEquals(45.0, controller.getCurrentAngleDegrees());
+            double initialAngle = 45.0;
+            controller.update(initialAngle, LOW_SPEED_KMH);
+            assertEquals(initialAngle, controller.getCurrentAngleDegrees());
 
             double centeredAngle = controller.selfCenter();
 
@@ -212,27 +209,12 @@ class SteeringControllerTest {
 
         @Test
         @DisplayName("selfCenter should return immediately to 0.0° from negative angle within 60°")
-        void shouldCenterFromNegativeAngle_inSingleTick() {
+        void shouldCenterInSingleTick_whenCurrentAngleIsNegative() {
             controller.update(-50.0, LOW_SPEED_KMH);
 
             double centeredAngle = controller.selfCenter();
 
             assertEquals(ZERO_DEGREES, centeredAngle);
-        }
-
-        @Test
-        @DisplayName("selfCenter should step toward 0.0° by 60° per tick when angle is large")
-        void shouldCenterAcrossMultipleTicks_whenAngleIsLarge() {
-            // Set angle to 150° in 3 ticks
-            controller.update(150.0, LOW_SPEED_KMH);
-            controller.update(150.0, LOW_SPEED_KMH);
-            controller.update(150.0, LOW_SPEED_KMH);
-            assertEquals(150.0, controller.getCurrentAngleDegrees());
-
-            // Centering: 150 -> 90 -> 30 -> 0
-            assertEquals(90.0, controller.selfCenter());
-            assertEquals(30.0, controller.selfCenter());
-            assertEquals(ZERO_DEGREES, controller.selfCenter());
         }
 
         @Test

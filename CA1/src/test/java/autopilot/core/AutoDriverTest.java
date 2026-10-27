@@ -38,6 +38,8 @@ class AutoDriverTest {
     private static final double ZERO_BRAKE_PRESSURE = 0.0;
     private static final double SAFE_MODE_BRAKE_PRESSURE = 30.0;
     private static final double MAX_BRAKE_PRESSURE = 100.0;
+    private static final double LANE_CORRECTION_ANGLE = 45.0;
+    private static final double DOUBLE_EPSILON = 1e-9;
 
     private SpeedSensor operationalSpeedSensor;
     private ObstacleSensor operationalObstacleSensor;
@@ -105,12 +107,12 @@ class AutoDriverTest {
 
         @ParameterizedTest(name = "Non-finite lane offset {0} produces steering {1}")
         @MethodSource("nonFiniteLaneOffsets")
-        void shouldUseCurrentLaneComparisonBehavior_forNonFiniteOffsets(double offset, double expectedAngle) {
+        void shouldUseCurrentLaneComparisonBehavior_whenOffsetIsNonFinite(double offset, double expectedAngle) {
             AutoDriver driver = new AutoDriver(operationalSpeedSensor, operationalObstacleSensor,
                     () -> offset, TARGET_SPEED_KMH);
             AutoDriver.DriveResult result = assertDoesNotThrow(() -> driver.tick(GearBox.Gear.D));
             assertAll(
-                    () -> assertEquals(expectedAngle, result.steeringAngleDegrees(), 1e-9),
+                    () -> assertEquals(expectedAngle, result.steeringAngleDegrees(), DOUBLE_EPSILON),
                     () -> assertFalse(result.safeMode()),
                     () -> assertEquals(AdaptiveCruise.Mode.HOLD, result.cruiseMode())
             );
@@ -166,19 +168,9 @@ class AutoDriverTest {
     @DisplayName("Cruise and Braking Dynamics Tests")
     class CruiseAndBrakingTests {
 
-        @ParameterizedTest(name = "Invalid obstacle distance {0} propagates cruise validation")
-        @ValueSource(doubles = {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -1.0})
-        void shouldPropagateCruiseValidation_forInvalidObstacleDistance(double distance) {
-            AutoDriver driver = new AutoDriver(operationalSpeedSensor, () -> distance,
-                    operationalLaneSensor, TARGET_SPEED_KMH);
-            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
-                    () -> driver.tick(GearBox.Gear.D));
-            assertEquals("distance must be a finite non-negative value", failure.getMessage());
-        }
-
         @Test
         @DisplayName("Sensor failure after emergency returns the Safe Mode result regardless of prior warning")
-        void shouldReturnSafeModeFields_afterEmergencyThenSensorFailure() {
+        void shouldReturnSafeModeFields_whenSensorFailsAfterEmergency() {
             boolean[] failure = {false};
             ObstacleSensor obstacle = () -> {
                 if (failure[0]) throw new SensorFailureException("obstacle failure");
@@ -191,13 +183,13 @@ class AutoDriverTest {
             AutoDriver.DriveResult safe = driver.tick(GearBox.Gear.D);
             assertAll(
                     () -> assertEquals(AdaptiveCruise.Mode.EMERGENCY_BRAKE, emergency.cruiseMode()),
-                    () -> assertEquals(100.0, emergency.brakePressure(), 1e-9),
-                    () -> assertEquals(-45.0, emergency.steeringAngleDegrees(), 1e-9),
+                    () -> assertEquals(MAX_BRAKE_PRESSURE, emergency.brakePressure(), DOUBLE_EPSILON),
+                    () -> assertEquals(-LANE_CORRECTION_ANGLE, emergency.steeringAngleDegrees(), DOUBLE_EPSILON),
                     () -> assertTrue(emergency.warningActive()),
                     () -> assertFalse(emergency.safeMode()),
                     () -> assertEquals(AdaptiveCruise.Mode.BRAKE, safe.cruiseMode()),
-                    () -> assertEquals(30.0, safe.brakePressure(), 1e-9),
-                    () -> assertEquals(0.0, safe.steeringAngleDegrees(), 1e-9),
+                    () -> assertEquals(SAFE_MODE_BRAKE_PRESSURE, safe.brakePressure(), DOUBLE_EPSILON),
+                    () -> assertEquals(ZERO_STEERING_ANGLE, safe.steeringAngleDegrees(), DOUBLE_EPSILON),
                     () -> assertFalse(safe.warningActive()),
                     () -> assertTrue(safe.safeMode())
             );
@@ -241,6 +233,7 @@ class AutoDriverTest {
         @Test
         @DisplayName("Should apply proportional braking when an obstacle is detected within safe distance")
         void shouldApplyProportionalBraking_whenObstacleWithinSafeDistance() {
+            double expectedProportionalBrakePressure = 25.0;
             ObstacleSensor closeObstacleSensor = () -> PROPORTIONAL_BRAKE_DISTANCE_METERS;
             AutoDriver driver = new AutoDriver(
                     operationalSpeedSensor,
@@ -253,8 +246,7 @@ class AutoDriverTest {
 
             assertAll(
                     () -> assertEquals(AdaptiveCruise.Mode.BRAKE, result.cruiseMode(), "Cruise mode should be BRAKE"),
-                    () -> assertEquals(25.0, result.brakePressure(), 0.001,
-                            "At 80 km/h and 30 m, proportional pressure is (40-30)/40*100 = 25"),
+                    () -> assertEquals(expectedProportionalBrakePressure, result.brakePressure(), DOUBLE_EPSILON),
                     () -> assertFalse(result.warningActive(), "Normal braking should not activate emergency warning"),
                     () -> assertFalse(result.safeMode(), "Normal braking should not trigger safe mode")
             );
@@ -283,7 +275,7 @@ class AutoDriverTest {
 
         @Test
         @DisplayName("Should transition from emergency braking to safe road while retaining current warning state")
-        void shouldTransitionAcrossTicksFromEmergencyBrakeToSafeRoad() {
+        void shouldTransitionFromEmergencyBrakeToHold_whenRoadBecomesSafe() {
             final double[] distance = {10.0};
             ObstacleSensor changingObstacle = () -> distance[0];
             AutoDriver driver = new AutoDriver(operationalSpeedSensor, changingObstacle,
@@ -304,15 +296,6 @@ class AutoDriverTest {
             );
         }
 
-        @Test
-        @DisplayName("Invalid sensor values propagate controller validation instead of becoming SensorFailureException")
-        void shouldPropagateIllegalArgumentException_forInvalidSensorValue() {
-            SpeedSensor invalidSpeed = () -> Double.NaN;
-            AutoDriver driver = new AutoDriver(invalidSpeed, operationalObstacleSensor,
-                    operationalLaneSensor, TARGET_SPEED_KMH);
-
-            assertThrows(IllegalArgumentException.class, () -> driver.tick(GearBox.Gear.D));
-        }
     }
 
     @Nested

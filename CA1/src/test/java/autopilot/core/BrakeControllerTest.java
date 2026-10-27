@@ -7,10 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
-
-import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -46,7 +43,7 @@ class BrakeControllerTest {
 
         @Test
         @DisplayName("Initial brake pressure should be 0.0% and warning should be inactive")
-        void shouldInitializeWithZeroPressureAndNoWarning() {
+        void shouldInitializeWithZeroPressureAndNoWarning_whenControllerIsCreated() {
             assertAll(
                     () -> assertEquals(ZERO_PRESSURE, controller.getPressure(), "Initial pressure should be 0.0%"),
                     () -> assertFalse(controller.isWarningActive(), "Warning indicator should initially be inactive")
@@ -113,7 +110,7 @@ class BrakeControllerTest {
 
         @ParameterizedTest(name = "Braking should be permitted in gear {0}")
         @EnumSource(value = GearBox.Gear.class, names = {"R", "N", "D"})
-        void shouldAllowBraking_inAllGearsExceptPark(GearBox.Gear allowedGear) {
+        void shouldAllowBraking_whenGearIsNotPark(GearBox.Gear allowedGear) {
             double resultingPressure = controller.apply(MODERATE_PRESSURE, LOW_SPEED_KMH, allowedGear);
 
             assertEquals(MODERATE_PRESSURE, resultingPressure,
@@ -180,7 +177,7 @@ class BrakeControllerTest {
 
         @Test
         @DisplayName("ABS should alternate between HIGH pulse (90%) and LOW pulse (60%) on consecutive ticks")
-        void shouldAlternateAbsPulsesOnConsecutiveTicks() {
+        void shouldAlternateAbsPulses_whenAbsRemainsActiveAcrossTicks() {
             // Tick 1: ABS High (90%)
             assertEquals(ABS_HIGH_PULSE, controller.apply(HIGH_PRESSURE, HIGH_SPEED_KMH, GearBox.Gear.D));
             // Tick 2: ABS Low (60%)
@@ -191,29 +188,9 @@ class BrakeControllerTest {
             assertEquals(ABS_LOW_PULSE, controller.apply(HIGH_PRESSURE, HIGH_SPEED_KMH, GearBox.Gear.D));
         }
 
-        @ParameterizedTest(name = "Sequence check: {0}")
-        @MethodSource("absPulseSequenceProvider")
-        void shouldFollowExpectedPulseSequence(String description, double[] requestedPressures, double[] expectedOutputs) {
-            BrakeController localController = new BrakeController();
-            for (int i = 0; i < requestedPressures.length; i++) {
-                double result = localController.apply(requestedPressures[i], HIGH_SPEED_KMH, GearBox.Gear.D);
-                assertEquals(expectedOutputs[i], result, "Mismatch at step " + i + " in " + description);
-            }
-        }
-
-        private static Stream<org.junit.jupiter.params.provider.Arguments> absPulseSequenceProvider() {
-            return Stream.of(
-                    org.junit.jupiter.params.provider.Arguments.of(
-                            "Continuous ABS engagement",
-                            new double[]{90.0, 90.0, 90.0, 90.0, 90.0},
-                            new double[]{90.0, 60.0, 90.0, 60.0, 90.0}
-                    )
-            );
-        }
-
         @Test
         @DisplayName("ABS pulse sequence should reset to HIGH pulse after a non-ABS brake application")
-        void shouldResetAbsPulseToHigh_afterConditionBecomesNonAbs() {
+        void shouldResetAbsPulseToHigh_whenConditionBecomesNonAbs() {
             // Tick 1 (ABS): High pulse 90%
             assertEquals(ABS_HIGH_PULSE, controller.apply(HIGH_PRESSURE, HIGH_SPEED_KMH, GearBox.Gear.D));
 
@@ -244,7 +221,7 @@ class BrakeControllerTest {
 
         @ParameterizedTest(name = "Emergency braking in gear {0} should set 100% pressure and activate warning")
         @EnumSource(value = GearBox.Gear.class, names = {"R", "N", "D"})
-        void shouldApplyFullPressureAndActivateWarning_onEmergencyBrake(GearBox.Gear gear) {
+        void shouldApplyFullPressureAndActivateWarning_whenEmergencyBrakeIsCalled(GearBox.Gear gear) {
             controller.emergencyBrake(gear);
 
             assertAll(
@@ -268,7 +245,7 @@ class BrakeControllerTest {
 
         @Test
         @DisplayName("Warning remains active on a later ordinary brake tick under current implementation")
-        void shouldKeepWarningActive_afterEmergencyThenOrdinaryTick() {
+        void shouldKeepWarningActive_whenOrdinaryBrakingFollowsEmergency() {
             controller.emergencyBrake(GearBox.Gear.D);
             assertTrue(controller.isWarningActive());
 
@@ -279,7 +256,7 @@ class BrakeControllerTest {
 
         @Test
         @DisplayName("Pressure above 100% is capped at exactly 100%")
-        void shouldCapRequestedPressureAtMaximum() {
+        void shouldCapRequestedPressure_whenRequestedPressureExceedsMaximum() {
             assertEquals(MAX_PRESSURE,
                     controller.apply(EXCESSIVE_PRESSURE, LOW_SPEED_KMH, GearBox.Gear.D));
         }

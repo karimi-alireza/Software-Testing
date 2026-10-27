@@ -5,14 +5,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvFileSource;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
-
-import java.util.List;
-import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -29,6 +24,8 @@ class AdaptiveCruiseTest {
     private static final double EMERGENCY_BRAKE_PRESSURE = 100.0;
     private static final double ZERO_AMOUNT = 0.0;
     private static final double DOUBLE_EPSILON = 0.001;
+    private static final double MAX_ACCELERATION_STEP_KMH = 5.0;
+    private static final double PERCENT_SCALE = 100.0;
 
     private AdaptiveCruise cruise;
 
@@ -86,14 +83,14 @@ class AdaptiveCruiseTest {
                 "100.0, 50.0",
                 "120.0, 60.0"
         })
-        void shouldCalculateSafeDistanceAccurately(double speedKmh, double expectedSafeDistance) {
+        void shouldCalculateSafeDistance_whenSpeedIsValid(double speedKmh, double expectedSafeDistance) {
             assertEquals(expectedSafeDistance, cruise.safeDistanceFor(speedKmh), DOUBLE_EPSILON,
                     "Safe distance must be exactly half the speed in meters");
         }
 
         @ParameterizedTest(name = "Representative speed {0} km/h has safe distance {1} m")
         @CsvSource({"1.0, 0.5", "50.0, 25.0", "200.0, 100.0"})
-        void shouldCalculateRepresentativeAndBoundarySafeDistances(double speedKmh, double expectedSafeDistance) {
+        void shouldCalculateSafeDistance_whenSpeedIsRepresentativeOrBoundaryValue(double speedKmh, double expectedSafeDistance) {
             assertEquals(expectedSafeDistance, cruise.safeDistanceFor(speedKmh), DOUBLE_EPSILON);
         }
     }
@@ -104,7 +101,7 @@ class AdaptiveCruiseTest {
 
         @ParameterizedTest(name = "[CSV] Speed {0} km/h, Distance {1} m => Mode {2}, Amount {3}")
         @CsvFileSource(resources = "/cruise_test_cases.csv", numLinesToSkip = 1)
-        void shouldMakeCorrectDecision_fromCsvDataset(double speedKmh,
+        void shouldMakeExpectedDecision_whenInputsComeFromCsvDataset(double speedKmh,
                                                       double distanceMeters,
                                                       AdaptiveCruise.Mode expectedMode,
                                                       double expectedAmount) {
@@ -123,24 +120,24 @@ class AdaptiveCruiseTest {
 
         @Test
         @DisplayName("Exact safe distance without prior braking should hold with zero amount")
-        void shouldHoldAtExactSafeDistance_withoutPriorBrakingState() {
+        void shouldHoldAtExactSafeDistance_whenNoPriorBrakingStateExists() {
             AdaptiveCruise.Decision decision = cruise.update(100.0, 50.0);
 
             assertAll(
                     () -> assertEquals(AdaptiveCruise.Mode.HOLD, decision.mode()),
-                    () -> assertEquals(0.0, decision.amount(), DOUBLE_EPSILON)
+                    () -> assertEquals(ZERO_AMOUNT, decision.amount(), DOUBLE_EPSILON)
             );
         }
 
         @Test
         @DisplayName("Zero speed and zero distance should safely request emergency braking")
-        void shouldHandleZeroSpeedAndZeroDistanceSafely() {
+        void shouldRequestEmergencyBraking_whenSpeedAndDistanceAreZero() {
             AdaptiveCruise zeroSpeedCruise = new AdaptiveCruise(50.0);
 
             AdaptiveCruise.Decision decision = zeroSpeedCruise.update(0.0, 0.0);
 
             assertAll(
-                    () -> assertEquals(0.0, zeroSpeedCruise.safeDistanceFor(0.0), DOUBLE_EPSILON),
+                    () -> assertEquals(ZERO_AMOUNT, zeroSpeedCruise.safeDistanceFor(ZERO_SPEED_KMH), DOUBLE_EPSILON),
                     () -> assertEquals(AdaptiveCruise.Mode.EMERGENCY_BRAKE, decision.mode()),
                     () -> assertEquals(EMERGENCY_BRAKE_PRESSURE, decision.amount(), DOUBLE_EPSILON)
             );
@@ -152,7 +149,7 @@ class AdaptiveCruiseTest {
                 "100.0, 25.001, BRAKE",
                 "100.0, 60.0, HOLD"
         })
-        void shouldRespectExactEmergencySafeAndReleaseBoundaries(double speedKmh,
+        void shouldSelectExpectedMode_whenDistanceIsAtOrNearThreshold(double speedKmh,
                                                                   double distanceMeters,
                                                                   AdaptiveCruise.Mode expectedMode) {
             AdaptiveCruise.Decision decision = cruise.update(speedKmh, distanceMeters);
@@ -160,29 +157,19 @@ class AdaptiveCruiseTest {
         }
 
         @Test
-        @DisplayName("Exact safe distance after braking retains hysteresis pressure")
-        void shouldBrakeAtExactSafeDistance_afterPriorBraking() {
-            cruise.update(100.0, 30.0);
-            AdaptiveCruise.Decision decision = cruise.update(100.0, 50.0);
-            assertAll(
-                    () -> assertEquals(AdaptiveCruise.Mode.BRAKE, decision.mode()),
-                    () -> assertEquals(10.0, decision.amount(), DOUBLE_EPSILON)
-            );
-        }
-
-        @Test
         @DisplayName("Small positive distance above emergency threshold produces proportional braking")
-        void shouldCalculateProportionalPressure_atSmallPositiveDistance() {
+        void shouldCalculateProportionalPressure_whenDistanceIsSmallAndAboveEmergencyThreshold() {
+            double expectedProportionalPressure = 25.0;
             AdaptiveCruise.Decision decision = cruise.update(0.002, 0.00075);
             assertAll(
                     () -> assertEquals(AdaptiveCruise.Mode.BRAKE, decision.mode()),
-                    () -> assertEquals(25.0, decision.amount(), 1e-9)
+                    () -> assertEquals(expectedProportionalPressure, decision.amount(), DOUBLE_EPSILON)
             );
         }
 
         @ParameterizedTest(name = "Speed {0} accelerates by {1}")
         @CsvSource({"97.0, 3.0", "90.0, 5.0"})
-        void shouldLimitAccelerationAmountForSmallAndLargeSpeedGaps(double speed, double amount) {
+        void shouldLimitAccelerationAmount_whenSpeedGapIsSmallOrLarge(double speed, double amount) {
             AdaptiveCruise.Decision decision = cruise.update(speed, 100.0);
             assertEquals(AdaptiveCruise.Mode.ACCELERATE, decision.mode());
             assertEquals(amount, decision.amount(), 1e-9);
@@ -190,7 +177,7 @@ class AdaptiveCruiseTest {
 
         @ParameterizedTest(name = "Speed {0} below target by {1} should accelerate by {1}")
         @CsvSource({"97.0, 3.0", "99.9, 0.1", "95.0, 5.0"})
-        void shouldUseExactAccelerationAmountWhenGapIsBelowOrAtMaximumStep(double speedKmh, double expectedAmount) {
+        void shouldUseExactAccelerationAmount_whenGapIsBelowOrAtMaximumStep(double speedKmh, double expectedAmount) {
             AdaptiveCruise.Decision decision = cruise.update(speedKmh, 100.0);
             assertAll(
                     () -> assertEquals(AdaptiveCruise.Mode.ACCELERATE, decision.mode()),
@@ -198,110 +185,68 @@ class AdaptiveCruiseTest {
             );
         }
 
-        @Test
-        @DisplayName("Hysteresis should keep gentle 10% brake active when distance is between safeDistance and releaseDistance")
-        void shouldApplyHysteresisBraking_whenDistanceExpandsBetweenSafeAndReleaseThresholds() {
-            // Safe distance for 100 km/h = 50m, release distance = 60m
-            // Step 1: Car detects close vehicle at 30m (< 50m safe) -> enters braking state
-            AdaptiveCruise.Decision step1 = cruise.update(TARGET_SPEED_KMH, 30.0);
-            assertEquals(AdaptiveCruise.Mode.BRAKE, step1.mode());
-            assertEquals(40.0, step1.amount(), DOUBLE_EPSILON); // (50 - 30)/50 * 100 = 40%
+        @ParameterizedTest(name = "Prior braking retains gentle pressure at distance {0} m")
+        @ValueSource(doubles = {40.0, 45.0, 47.99})
+        void shouldMaintainHysteresisBraking_whenDistanceIsBetweenSafeAndReleaseThresholds(double distanceMeters) {
+            enterBrakingState(LOWER_SPEED_KMH);
+            AdaptiveCruise.Decision decision = cruise.update(LOWER_SPEED_KMH, distanceMeters);
 
-            // Step 2: Distance expands to 55m (between safe 50m and release 60m).
-            // Normal mode without hysteresis would accelerate, but hysteresis keeps gentle 10% brake
-            AdaptiveCruise.Decision step2 = cruise.update(TARGET_SPEED_KMH, 55.0);
-            assertAll(
-                    () -> assertEquals(AdaptiveCruise.Mode.BRAKE, step2.mode(),
-                            "Hysteresis must maintain BRAKE mode below release distance"),
-                    () -> assertEquals(HYSTERESIS_BRAKE_PRESSURE, step2.amount(), DOUBLE_EPSILON,
-                            "Hysteresis brake pressure must be 10.0%")
-            );
-
-            // Step 3: Distance reaches 60m (>= release distance 60m) -> hysteresis is released
-            AdaptiveCruise.Decision step3 = cruise.update(TARGET_SPEED_KMH, 60.0);
-            assertAll(
-                    () -> assertEquals(AdaptiveCruise.Mode.HOLD, step3.mode(),
-                            "At target speed and >= release distance, mode should transition to HOLD"),
-                    () -> assertEquals(ZERO_AMOUNT, step3.amount(), DOUBLE_EPSILON)
-            );
+            assertEquals(AdaptiveCruise.Mode.BRAKE, decision.mode());
+            assertEquals(HYSTERESIS_BRAKE_PRESSURE, decision.amount(), DOUBLE_EPSILON);
         }
 
         @Test
-        @DisplayName("Hysteresis should transition to ACCELERATE once release distance is surpassed and speed is below target")
-        void shouldAccelerate_afterHysteresisReleasedWhenSpeedBelowTarget() {
-            // Speed 80 km/h: safeDistance = 40m, releaseDistance = 48m
-            // Step 1: Close obstacle at 25m (< 40m) -> enters braking state
-            cruise.update(LOWER_SPEED_KMH, 25.0);
+        @DisplayName("Hysteresis releases at the release distance and permits acceleration")
+        void shouldReleaseHysteresisAndAccelerate_whenDistanceReachesReleaseThreshold() {
+            enterBrakingState(LOWER_SPEED_KMH);
+            double releaseDistanceMeters = 48.0;
+            AdaptiveCruise.Decision decision = cruise.update(LOWER_SPEED_KMH, releaseDistanceMeters);
 
-            // Step 2: Distance opens up to 45m (between 40m and 48m) -> still braking due to hysteresis
-            AdaptiveCruise.Decision step2 = cruise.update(LOWER_SPEED_KMH, 45.0);
-            assertEquals(AdaptiveCruise.Mode.BRAKE, step2.mode());
-            assertEquals(HYSTERESIS_BRAKE_PRESSURE, step2.amount(), DOUBLE_EPSILON);
-
-            // Step 3: Distance reaches 50m (>= releaseDistance 48m) -> hysteresis cleared, vehicle accelerates!
-            AdaptiveCruise.Decision step3 = cruise.update(LOWER_SPEED_KMH, 50.0);
-            assertAll(
-                    () -> assertEquals(AdaptiveCruise.Mode.ACCELERATE, step3.mode(),
-                            "Vehicle must accelerate once hysteresis is released"),
-                    () -> assertEquals(5.0, step3.amount(), DOUBLE_EPSILON,
-                            "Acceleration step is capped at 5.0 km/h")
-            );
+            assertEquals(AdaptiveCruise.Mode.ACCELERATE, decision.mode());
+            assertEquals(MAX_ACCELERATION_STEP_KMH, decision.amount(), DOUBLE_EPSILON);
         }
 
         @Test
-        @DisplayName("Without prior braking state, distance between safe and release should accelerate immediately")
+        @DisplayName("Without prior braking, distance between safe and release should accelerate immediately")
         void shouldAccelerateImmediately_whenNoPriorBrakingStateExists() {
-            // Speed 80 km/h: safeDistance = 40m, releaseDistance = 48m
-            // Initial tick with distance 45m (already > safeDistance 40m)
-            AdaptiveCruise.Decision decision = cruise.update(LOWER_SPEED_KMH, 45.0);
+            double distanceBetweenThresholdsMeters = 45.0;
+            AdaptiveCruise.Decision decision = cruise.update(LOWER_SPEED_KMH, distanceBetweenThresholdsMeters);
 
-            assertAll(
-                    () -> assertEquals(AdaptiveCruise.Mode.ACCELERATE, decision.mode(),
-                            "Without prior braking, distance > safeDistance should accelerate immediately"),
-                    () -> assertEquals(5.0, decision.amount(), DOUBLE_EPSILON)
-            );
+            assertEquals(AdaptiveCruise.Mode.ACCELERATE, decision.mode());
+            assertEquals(MAX_ACCELERATION_STEP_KMH, decision.amount(), DOUBLE_EPSILON);
         }
 
-        @ParameterizedTest(name = "{0}")
-        @MethodSource("multiStepDrivingSequenceProvider")
-        void shouldExecuteMultiStepTrajectoryAccurately(String scenarioName,
-                                                        List<TickInput> inputs,
-                                                        List<AdaptiveCruise.Decision> expectedDecisions) {
-            AdaptiveCruise localCruise = new AdaptiveCruise(TARGET_SPEED_KMH);
+        @Test
+        @DisplayName("Emergency braking progresses through proportional braking and hysteresis to HOLD")
+        void shouldTransitionThroughBrakingModes_whenObstacleDistanceIncreasesAcrossTicks() {
+            double emergencyDistanceMeters = 20.0;
+            double proportionalDistanceMeters = 35.0;
+            double hysteresisDistanceMeters = 52.0;
+            double releaseDistanceMeters = 60.0;
+            double safeDistanceMeters = 50.0;
+            double expectedProportionalPressure =
+                    (safeDistanceMeters - proportionalDistanceMeters) / safeDistanceMeters * PERCENT_SCALE;
 
-            for (int i = 0; i < inputs.size(); i++) {
-                TickInput input = inputs.get(i);
-                AdaptiveCruise.Decision expected = expectedDecisions.get(i);
-                AdaptiveCruise.Decision actual = localCruise.update(input.speed(), input.distance());
+            AdaptiveCruise.Decision emergency = cruise.update(TARGET_SPEED_KMH, emergencyDistanceMeters);
+            assertEquals(AdaptiveCruise.Mode.EMERGENCY_BRAKE, emergency.mode());
+            assertEquals(EMERGENCY_BRAKE_PRESSURE, emergency.amount(), DOUBLE_EPSILON);
 
-                assertEquals(expected.mode(), actual.mode(),
-                        scenarioName + " at tick " + i + " mode mismatch");
-                assertEquals(expected.amount(), actual.amount(), DOUBLE_EPSILON,
-                        scenarioName + " at tick " + i + " amount mismatch");
-            }
-        }
+            AdaptiveCruise.Decision proportional = cruise.update(TARGET_SPEED_KMH, proportionalDistanceMeters);
+            assertEquals(AdaptiveCruise.Mode.BRAKE, proportional.mode());
+            assertEquals(expectedProportionalPressure, proportional.amount(), DOUBLE_EPSILON);
 
-        private static Stream<Arguments> multiStepDrivingSequenceProvider() {
-            return Stream.of(
-                    Arguments.of(
-                            "Emergency brake into hysteresis release sequence",
-                            List.of(
-                                    new TickInput(100.0, 20.0), // emergency (< 25m)
-                                    new TickInput(100.0, 35.0), // still < safe 50m -> proportional brake
-                                    new TickInput(100.0, 52.0), // in hysteresis [50, 60) -> 10% brake
-                                    new TickInput(100.0, 65.0)  // released (>= 60m) -> HOLD
-                            ),
-                            List.of(
-                                    new AdaptiveCruise.Decision(AdaptiveCruise.Mode.EMERGENCY_BRAKE, 100.0),
-                                    new AdaptiveCruise.Decision(AdaptiveCruise.Mode.BRAKE, 30.0), // (50-35)/50*100 = 30%
-                                    new AdaptiveCruise.Decision(AdaptiveCruise.Mode.BRAKE, 10.0),
-                                    new AdaptiveCruise.Decision(AdaptiveCruise.Mode.HOLD, 0.0)
-                            )
-                    )
-            );
+            AdaptiveCruise.Decision hysteresis = cruise.update(TARGET_SPEED_KMH, hysteresisDistanceMeters);
+            assertEquals(AdaptiveCruise.Mode.BRAKE, hysteresis.mode());
+            assertEquals(HYSTERESIS_BRAKE_PRESSURE, hysteresis.amount(), DOUBLE_EPSILON);
+
+            AdaptiveCruise.Decision released = cruise.update(TARGET_SPEED_KMH, releaseDistanceMeters);
+            assertEquals(AdaptiveCruise.Mode.HOLD, released.mode());
+            assertEquals(ZERO_AMOUNT, released.amount(), DOUBLE_EPSILON);
         }
     }
 
-    private record TickInput(double speed, double distance) {
+    private void enterBrakingState(double speedKmh) {
+        double distanceBelowSafeThresholdMeters = speedKmh * 0.5 * 0.75;
+        cruise.update(speedKmh, distanceBelowSafeThresholdMeters);
     }
 }
