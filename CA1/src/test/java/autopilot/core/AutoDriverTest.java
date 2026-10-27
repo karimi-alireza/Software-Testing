@@ -103,6 +103,25 @@ class AutoDriverTest {
     @DisplayName("Steering and Lane Deviation Tests")
     class SteeringControlTests {
 
+        @ParameterizedTest(name = "Non-finite lane offset {0} produces steering {1}")
+        @MethodSource("nonFiniteLaneOffsets")
+        void shouldUseCurrentLaneComparisonBehavior_forNonFiniteOffsets(double offset, double expectedAngle) {
+            AutoDriver driver = new AutoDriver(operationalSpeedSensor, operationalObstacleSensor,
+                    () -> offset, TARGET_SPEED_KMH);
+            AutoDriver.DriveResult result = assertDoesNotThrow(() -> driver.tick(GearBox.Gear.D));
+            assertAll(
+                    () -> assertEquals(expectedAngle, result.steeringAngleDegrees(), 1e-9),
+                    () -> assertFalse(result.safeMode()),
+                    () -> assertEquals(AdaptiveCruise.Mode.HOLD, result.cruiseMode())
+            );
+        }
+
+        private static Stream<Arguments> nonFiniteLaneOffsets() {
+            return Stream.of(Arguments.of(Double.NaN, 0.0),
+                    Arguments.of(Double.POSITIVE_INFINITY, -45.0),
+                    Arguments.of(Double.NEGATIVE_INFINITY, 45.0));
+        }
+
         @ParameterizedTest(name = "Lane offset {0}m within threshold [-0.5, 0.5] should keep steering centered (0.0°)")
         @ValueSource(doubles = {0.0, 0.5, -0.5, 0.49, -0.49})
         void shouldKeepSteeringCentered_whenLaneDeviationWithinThreshold(double laneOffsetMeters) {
@@ -146,6 +165,43 @@ class AutoDriverTest {
     @Nested
     @DisplayName("Cruise and Braking Dynamics Tests")
     class CruiseAndBrakingTests {
+
+        @ParameterizedTest(name = "Invalid obstacle distance {0} propagates cruise validation")
+        @ValueSource(doubles = {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -1.0})
+        void shouldPropagateCruiseValidation_forInvalidObstacleDistance(double distance) {
+            AutoDriver driver = new AutoDriver(operationalSpeedSensor, () -> distance,
+                    operationalLaneSensor, TARGET_SPEED_KMH);
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> driver.tick(GearBox.Gear.D));
+            assertEquals("distance must be a finite non-negative value", failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("Sensor failure after emergency returns the Safe Mode result regardless of prior warning")
+        void shouldReturnSafeModeFields_afterEmergencyThenSensorFailure() {
+            boolean[] failure = {false};
+            ObstacleSensor obstacle = () -> {
+                if (failure[0]) throw new SensorFailureException("obstacle failure");
+                return EMERGENCY_DISTANCE_METERS;
+            };
+            AutoDriver driver = new AutoDriver(operationalSpeedSensor, obstacle,
+                    () -> 1.0, TARGET_SPEED_KMH);
+            AutoDriver.DriveResult emergency = driver.tick(GearBox.Gear.D);
+            failure[0] = true;
+            AutoDriver.DriveResult safe = driver.tick(GearBox.Gear.D);
+            assertAll(
+                    () -> assertEquals(AdaptiveCruise.Mode.EMERGENCY_BRAKE, emergency.cruiseMode()),
+                    () -> assertEquals(100.0, emergency.brakePressure(), 1e-9),
+                    () -> assertEquals(-45.0, emergency.steeringAngleDegrees(), 1e-9),
+                    () -> assertTrue(emergency.warningActive()),
+                    () -> assertFalse(emergency.safeMode()),
+                    () -> assertEquals(AdaptiveCruise.Mode.BRAKE, safe.cruiseMode()),
+                    () -> assertEquals(30.0, safe.brakePressure(), 1e-9),
+                    () -> assertEquals(0.0, safe.steeringAngleDegrees(), 1e-9),
+                    () -> assertFalse(safe.warningActive()),
+                    () -> assertTrue(safe.safeMode())
+            );
+        }
 
         @Test
         @DisplayName("Should maintain speed (HOLD) with zero braking when running at target speed on clear road")
@@ -364,6 +420,7 @@ class AutoDriverTest {
             assertAll(
                     () -> assertTrue(result.safeMode()),
                     () -> assertEquals(SAFE_MODE_BRAKE_PRESSURE, result.brakePressure()),
+                    () -> assertEquals(ZERO_STEERING_ANGLE, result.steeringAngleDegrees()),
                     () -> assertEquals(AdaptiveCruise.Mode.BRAKE, result.cruiseMode()),
                     () -> assertFalse(result.warningActive())
             );
@@ -383,6 +440,7 @@ class AutoDriverTest {
             assertAll(
                     () -> assertTrue(result.safeMode()),
                     () -> assertEquals(SAFE_MODE_BRAKE_PRESSURE, result.brakePressure()),
+                    () -> assertEquals(ZERO_STEERING_ANGLE, result.steeringAngleDegrees()),
                     () -> assertEquals(AdaptiveCruise.Mode.BRAKE, result.cruiseMode()),
                     () -> assertFalse(result.warningActive())
             );

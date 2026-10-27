@@ -150,17 +150,42 @@ class AdaptiveCruiseTest {
         @CsvSource({
                 "100.0, 25.0, EMERGENCY_BRAKE",
                 "100.0, 25.001, BRAKE",
-                "100.0, 50.0, BRAKE",
                 "100.0, 60.0, HOLD"
         })
         void shouldRespectExactEmergencySafeAndReleaseBoundaries(double speedKmh,
                                                                   double distanceMeters,
                                                                   AdaptiveCruise.Mode expectedMode) {
-            if (distanceMeters == 50.0) {
-                cruise.update(speedKmh, 30.0);
-            }
             AdaptiveCruise.Decision decision = cruise.update(speedKmh, distanceMeters);
             assertEquals(expectedMode, decision.mode());
+        }
+
+        @Test
+        @DisplayName("Exact safe distance after braking retains hysteresis pressure")
+        void shouldBrakeAtExactSafeDistance_afterPriorBraking() {
+            cruise.update(100.0, 30.0);
+            AdaptiveCruise.Decision decision = cruise.update(100.0, 50.0);
+            assertAll(
+                    () -> assertEquals(AdaptiveCruise.Mode.BRAKE, decision.mode()),
+                    () -> assertEquals(10.0, decision.amount(), DOUBLE_EPSILON)
+            );
+        }
+
+        @Test
+        @DisplayName("Small positive distance above emergency threshold produces proportional braking")
+        void shouldCalculateProportionalPressure_atSmallPositiveDistance() {
+            AdaptiveCruise.Decision decision = cruise.update(0.002, 0.00075);
+            assertAll(
+                    () -> assertEquals(AdaptiveCruise.Mode.BRAKE, decision.mode()),
+                    () -> assertEquals(25.0, decision.amount(), 1e-9)
+            );
+        }
+
+        @ParameterizedTest(name = "Speed {0} accelerates by {1}")
+        @CsvSource({"97.0, 3.0", "90.0, 5.0"})
+        void shouldLimitAccelerationAmountForSmallAndLargeSpeedGaps(double speed, double amount) {
+            AdaptiveCruise.Decision decision = cruise.update(speed, 100.0);
+            assertEquals(AdaptiveCruise.Mode.ACCELERATE, decision.mode());
+            assertEquals(amount, decision.amount(), 1e-9);
         }
 
         @ParameterizedTest(name = "Speed {0} below target by {1} should accelerate by {1}")

@@ -115,6 +115,16 @@ class SteeringControllerTest {
     class RateLimitingTests {
 
         @Test
+        @DisplayName("Increasing speed clamps the target while preserving the rate limit")
+        void shouldClampTargetWhenSpeedIncreasesBetweenTicks() {
+            assertEquals(60.0, controller.update(450.0, 50.0), 1e-9);
+            assertEquals(450.0, controller.getTargetAngleDegrees(), 1e-9);
+            assertEquals(90.0, controller.update(450.0, 140.0), 1e-9);
+            assertEquals(90.0, controller.getCurrentAngleDegrees(), 1e-9);
+            assertEquals(90.0, controller.getTargetAngleDegrees(), 1e-9);
+        }
+
+        @Test
         @DisplayName("High-speed clamp and per-tick rate limit should compose across two ticks")
         void shouldApplyRateLimitBeforeReachingHighSpeedAngleLimit() {
             assertEquals(60.0, controller.update(450.0, 140.0),

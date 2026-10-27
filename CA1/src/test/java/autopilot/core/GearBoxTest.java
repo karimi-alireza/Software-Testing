@@ -196,8 +196,9 @@ class GearBoxTest {
             transitionTo(GearBox.Gear.R);
             speedSensor.setSpeedKmh(nonZeroSpeed);
 
-            assertThrows(IllegalGearChangeException.class, () -> gearBox.changeTo(GearBox.Gear.D),
-                    "R -> D must be rejected if speed is greater than 0.0 km/h");
+            IllegalGearChangeException exception = assertThrows(IllegalGearChangeException.class,
+                    () -> gearBox.changeTo(GearBox.Gear.D));
+            assertTrue(exception.getMessage().contains("Cannot change from R to D"));
         }
 
         @ParameterizedTest(name = "Shift D -> R at speed {0} km/h (> 0.0) should throw IllegalGearChangeException")
@@ -206,8 +207,9 @@ class GearBoxTest {
             transitionTo(GearBox.Gear.D);
             speedSensor.setSpeedKmh(nonZeroSpeed);
 
-            assertThrows(IllegalGearChangeException.class, () -> gearBox.changeTo(GearBox.Gear.R),
-                    "D -> R must be rejected if speed is greater than 0.0 km/h");
+            IllegalGearChangeException exception = assertThrows(IllegalGearChangeException.class,
+                    () -> gearBox.changeTo(GearBox.Gear.R));
+            assertTrue(exception.getMessage().contains("Cannot change from D to R"));
         }
 
         @ParameterizedTest(name = "Direct invalid transition from {0} to {1} at speed {2} km/h should be rejected")
@@ -233,6 +235,7 @@ class GearBoxTest {
         }
     }
 
+    // Called only on the fresh gearbox, whose initial gear is P.
     private void transitionTo(GearBox.Gear target) {
         speedSensor.setSpeedKmh(ZERO_SPEED_KMH);
         switch (target) {

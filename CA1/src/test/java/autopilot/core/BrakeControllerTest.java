@@ -23,14 +23,11 @@ class BrakeControllerTest {
 
     private static final double ZERO_PRESSURE = 0.0;
     private static final double MODERATE_PRESSURE = 50.0;
-    private static final double ABS_THRESHOLD_PRESSURE = 80.0;
     private static final double HIGH_PRESSURE = 95.0;
     private static final double EXCESSIVE_PRESSURE = 150.0;
     private static final double MAX_PRESSURE = 100.0;
 
-    private static final double ZERO_SPEED_KMH = 0.0;
     private static final double LOW_SPEED_KMH = 20.0;
-    private static final double ABS_THRESHOLD_SPEED_KMH = 30.0;
     private static final double HIGH_SPEED_KMH = 60.0;
 
     private static final double ABS_HIGH_PULSE = 90.0;
@@ -64,33 +61,33 @@ class BrakeControllerTest {
         @ParameterizedTest(name = "Pressure {0} is invalid and should throw IllegalArgumentException")
         @ValueSource(doubles = {-0.01, -25.0, Double.NaN, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY})
         void shouldThrowIllegalArgumentException_whenPressureIsNegativeOrNonFinite(double invalidPressure) {
-            assertThrows(IllegalArgumentException.class,
-                    () -> controller.apply(invalidPressure, HIGH_SPEED_KMH, GearBox.Gear.D),
-                    "Pressure must be a finite non-negative value");
+            IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                    () -> controller.apply(invalidPressure, HIGH_SPEED_KMH, GearBox.Gear.D));
+            assertEquals("pressure must be a finite non-negative value", exception.getMessage());
         }
 
         @ParameterizedTest(name = "Speed {0} is invalid and should throw IllegalArgumentException")
         @ValueSource(doubles = {-0.01, -50.0, Double.NaN, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY})
         void shouldThrowIllegalArgumentException_whenSpeedIsNegativeOrNonFinite(double invalidSpeed) {
-            assertThrows(IllegalArgumentException.class,
-                    () -> controller.apply(MODERATE_PRESSURE, invalidSpeed, GearBox.Gear.D),
-                    "Speed must be a finite non-negative value");
+            IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                    () -> controller.apply(MODERATE_PRESSURE, invalidSpeed, GearBox.Gear.D));
+            assertEquals("speed must be a finite non-negative value", exception.getMessage());
         }
 
         @Test
         @DisplayName("apply should throw NullPointerException when gear is null")
         void shouldThrowNullPointerException_whenGearIsNullInApply() {
-            assertThrows(NullPointerException.class,
-                    () -> controller.apply(MODERATE_PRESSURE, HIGH_SPEED_KMH, null),
-                    "Gear must not be null");
+            NullPointerException exception = assertThrows(NullPointerException.class,
+                    () -> controller.apply(MODERATE_PRESSURE, HIGH_SPEED_KMH, null));
+            assertEquals("gear must not be null", exception.getMessage());
         }
 
         @Test
         @DisplayName("emergencyBrake should throw NullPointerException when gear is null")
         void shouldThrowNullPointerException_whenGearIsNullInEmergencyBrake() {
-            assertThrows(NullPointerException.class,
-                    () -> controller.emergencyBrake(null),
-                    "Gear must not be null");
+            NullPointerException exception = assertThrows(NullPointerException.class,
+                    () -> controller.emergencyBrake(null));
+            assertEquals("gear must not be null", exception.getMessage());
         }
     }
 
@@ -233,7 +230,7 @@ class BrakeControllerTest {
             // Tick 1 (ABS): High pulse 90%
             assertEquals(ABS_HIGH_PULSE, controller.apply(HIGH_PRESSURE, HIGH_SPEED_KMH, GearBox.Gear.D));
 
-            // Tick 2: Speed drops below 30 km/h -> ABS disengages, applies bounded pressure (100%)
+            // Tick 2: Speed drops below 30 km/h -> ABS disengages, applies requested pressure (95%)
             assertEquals(HIGH_PRESSURE, controller.apply(HIGH_PRESSURE, LOW_SPEED_KMH, GearBox.Gear.D));
 
             // Tick 3: Speed goes back up -> ABS re-engages, pulse must start at High (90%)
