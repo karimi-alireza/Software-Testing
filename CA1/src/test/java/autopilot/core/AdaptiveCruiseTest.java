@@ -90,6 +90,12 @@ class AdaptiveCruiseTest {
             assertEquals(expectedSafeDistance, cruise.safeDistanceFor(speedKmh), DOUBLE_EPSILON,
                     "Safe distance must be exactly half the speed in meters");
         }
+
+        @ParameterizedTest(name = "Representative speed {0} km/h has safe distance {1} m")
+        @CsvSource({"1.0, 0.5", "50.0, 25.0", "200.0, 100.0"})
+        void shouldCalculateRepresentativeAndBoundarySafeDistances(double speedKmh, double expectedSafeDistance) {
+            assertEquals(expectedSafeDistance, cruise.safeDistanceFor(speedKmh), DOUBLE_EPSILON);
+        }
     }
 
     @Nested
@@ -114,6 +120,33 @@ class AdaptiveCruiseTest {
     @Nested
     @DisplayName("Hysteresis and State Transition Dynamics Tests")
     class HysteresisTransitionTests {
+
+        @ParameterizedTest(name = "At speed {0}, distance {1} should produce {2}")
+        @CsvSource({
+                "100.0, 25.0, EMERGENCY_BRAKE",
+                "100.0, 25.001, BRAKE",
+                "100.0, 50.0, BRAKE",
+                "100.0, 60.0, HOLD"
+        })
+        void shouldRespectExactEmergencySafeAndReleaseBoundaries(double speedKmh,
+                                                                  double distanceMeters,
+                                                                  AdaptiveCruise.Mode expectedMode) {
+            if (distanceMeters == 50.0) {
+                cruise.update(speedKmh, 30.0);
+            }
+            AdaptiveCruise.Decision decision = cruise.update(speedKmh, distanceMeters);
+            assertEquals(expectedMode, decision.mode());
+        }
+
+        @ParameterizedTest(name = "Speed {0} below target by {1} should accelerate by {1}")
+        @CsvSource({"97.0, 3.0", "99.9, 0.1", "95.0, 5.0"})
+        void shouldUseExactAccelerationAmountWhenGapIsBelowOrAtMaximumStep(double speedKmh, double expectedAmount) {
+            AdaptiveCruise.Decision decision = cruise.update(speedKmh, 100.0);
+            assertAll(
+                    () -> assertEquals(AdaptiveCruise.Mode.ACCELERATE, decision.mode()),
+                    () -> assertEquals(expectedAmount, decision.amount(), DOUBLE_EPSILON)
+            );
+        }
 
         @Test
         @DisplayName("Hysteresis should keep gentle 10% brake active when distance is between safeDistance and releaseDistance")

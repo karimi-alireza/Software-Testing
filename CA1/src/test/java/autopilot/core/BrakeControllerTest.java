@@ -268,5 +268,23 @@ class BrakeControllerTest {
             // Subsequent ABS application should start at High pulse (90%)
             assertEquals(ABS_HIGH_PULSE, controller.apply(HIGH_PRESSURE, HIGH_SPEED_KMH, GearBox.Gear.D));
         }
+
+        @Test
+        @DisplayName("Warning remains active on a later ordinary brake tick under current implementation")
+        void shouldKeepWarningActive_afterEmergencyThenOrdinaryTick() {
+            controller.emergencyBrake(GearBox.Gear.D);
+            assertTrue(controller.isWarningActive());
+
+            controller.apply(MODERATE_PRESSURE, LOW_SPEED_KMH, GearBox.Gear.D);
+            assertTrue(controller.isWarningActive(),
+                    "Current implementation does not reset warningActive during apply");
+        }
+
+        @Test
+        @DisplayName("Pressure above 100% is capped at exactly 100%")
+        void shouldCapRequestedPressureAtMaximum() {
+            assertEquals(MAX_PRESSURE,
+                    controller.apply(EXCESSIVE_PRESSURE, LOW_SPEED_KMH, GearBox.Gear.D));
+        }
     }
 }

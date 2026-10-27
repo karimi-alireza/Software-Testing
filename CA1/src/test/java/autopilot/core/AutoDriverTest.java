@@ -17,6 +17,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -196,7 +197,8 @@ class AutoDriverTest {
 
             assertAll(
                     () -> assertEquals(AdaptiveCruise.Mode.BRAKE, result.cruiseMode(), "Cruise mode should be BRAKE"),
-                    () -> assertTrue(result.brakePressure() > ZERO_BRAKE_PRESSURE, "Brake pressure should be positive"),
+                    () -> assertEquals(25.0, result.brakePressure(), 0.001,
+                            "At 80 km/h and 30 m, proportional pressure is (40-30)/40*100 = 25"),
                     () -> assertFalse(result.warningActive(), "Normal braking should not activate emergency warning"),
                     () -> assertFalse(result.safeMode(), "Normal braking should not trigger safe mode")
             );
@@ -221,6 +223,39 @@ class AutoDriverTest {
                     () -> assertTrue(result.warningActive(), "Emergency braking must activate warning indicator"),
                     () -> assertFalse(result.safeMode(), "Emergency braking is an intentional control action, not a safe mode failure")
             );
+        }
+
+        @Test
+        @DisplayName("Should transition from emergency braking to safe road while retaining current warning state")
+        void shouldTransitionAcrossTicksFromEmergencyBrakeToSafeRoad() {
+            final double[] distance = {10.0};
+            ObstacleSensor changingObstacle = () -> distance[0];
+            AutoDriver driver = new AutoDriver(operationalSpeedSensor, changingObstacle,
+                    operationalLaneSensor, TARGET_SPEED_KMH);
+
+            AutoDriver.DriveResult emergency = driver.tick(GearBox.Gear.D);
+            distance[0] = CLEAR_ROAD_DISTANCE_METERS;
+            AutoDriver.DriveResult clear = driver.tick(GearBox.Gear.D);
+
+            assertAll(
+                    () -> assertEquals(AdaptiveCruise.Mode.EMERGENCY_BRAKE, emergency.cruiseMode()),
+                    () -> assertEquals(MAX_BRAKE_PRESSURE, emergency.brakePressure()),
+                    () -> assertTrue(emergency.warningActive()),
+                    () -> assertEquals(AdaptiveCruise.Mode.HOLD, clear.cruiseMode()),
+                    () -> assertEquals(ZERO_BRAKE_PRESSURE, clear.brakePressure()),
+                    () -> assertTrue(clear.warningActive(),
+                            "Warning remains active because BrakeController.apply does not reset it")
+            );
+        }
+
+        @Test
+        @DisplayName("Invalid sensor values propagate controller validation instead of becoming SensorFailureException")
+        void shouldPropagateIllegalArgumentException_forInvalidSensorValue() {
+            SpeedSensor invalidSpeed = () -> Double.NaN;
+            AutoDriver driver = new AutoDriver(invalidSpeed, operationalObstacleSensor,
+                    operationalLaneSensor, TARGET_SPEED_KMH);
+
+            assertThrows(IllegalArgumentException.class, () -> driver.tick(GearBox.Gear.D));
         }
     }
 
@@ -298,6 +333,39 @@ class AutoDriverTest {
                     Arguments.of("speed sensor fails", failingSpeed, operationalObstacle, operationalLane),
                     Arguments.of("obstacle sensor fails", operationalSpeed, failingObstacle, operationalLane),
                     Arguments.of("lane sensor fails", operationalSpeed, operationalObstacle, failingLane)
+            );
+        }
+
+        @Test
+        @DisplayName("Multiple simultaneous sensor failures still complete the tick in safe mode")
+        void shouldEnterSafeMode_whenMoreThanOneSensorFails() {
+            SpeedSensor failingSpeed = () -> { throw new SensorFailureException("speed"); };
+            ObstacleSensor failingObstacle = () -> { throw new SensorFailureException("obstacle"); };
+            AutoDriver driver = new AutoDriver(failingSpeed, failingObstacle,
+                    operationalLaneSensor, TARGET_SPEED_KMH);
+
+            AutoDriver.DriveResult result = assertDoesNotThrow(() -> driver.tick(GearBox.Gear.D));
+            assertAll(
+                    () -> assertTrue(result.safeMode()),
+                    () -> assertEquals(SAFE_MODE_BRAKE_PRESSURE, result.brakePressure()),
+                    () -> assertEquals(AdaptiveCruise.Mode.BRAKE, result.cruiseMode()),
+                    () -> assertEquals(ZERO_STEERING_ANGLE, result.steeringAngleDegrees())
+            );
+        }
+
+        @Test
+        @DisplayName("Sensor failure in PARK enters safe mode and returns safe-mode braking result")
+        void shouldEnterSafeMode_whenSensorFailsInParkGear() {
+            SpeedSensor failingSpeed = () -> { throw new SensorFailureException("speed"); };
+            AutoDriver driver = new AutoDriver(failingSpeed, operationalObstacleSensor,
+                    operationalLaneSensor, TARGET_SPEED_KMH);
+
+            AutoDriver.DriveResult result = assertDoesNotThrow(() -> driver.tick(GearBox.Gear.P));
+            assertAll(
+                    () -> assertTrue(result.safeMode()),
+                    () -> assertEquals(SAFE_MODE_BRAKE_PRESSURE, result.brakePressure()),
+                    () -> assertEquals(AdaptiveCruise.Mode.BRAKE, result.cruiseMode()),
+                    () -> assertFalse(result.warningActive())
             );
         }
     }
