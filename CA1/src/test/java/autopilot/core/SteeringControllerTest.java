@@ -114,6 +114,16 @@ class SteeringControllerTest {
     @DisplayName("Rate Limiting (Per-Tick Movement) Tests")
     class RateLimitingTests {
 
+        @Test
+        @DisplayName("High-speed clamp and per-tick rate limit should compose across two ticks")
+        void shouldApplyRateLimitBeforeReachingHighSpeedAngleLimit() {
+            assertEquals(60.0, controller.update(450.0, 140.0),
+                    "First tick must move at most 60 degrees toward the clamped 90-degree target");
+            assertEquals(90.0, controller.update(450.0, 140.0),
+                    "Second tick must reach the high-speed clamp of 90 degrees");
+            assertEquals(90.0, controller.getTargetAngleDegrees());
+        }
+
         @ParameterizedTest(name = "Target {0}° within 60° should be reached in a single tick")
         @ValueSource(doubles = {0.0, 30.0, -30.0, 60.0, -60.0})
         void shouldReachTargetDirectly_whenAngleDifferenceIsWithinMaxChangePerTick(double requestedAngle) {

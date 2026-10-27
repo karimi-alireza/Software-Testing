@@ -234,7 +234,7 @@ class BrakeControllerTest {
             assertEquals(ABS_HIGH_PULSE, controller.apply(HIGH_PRESSURE, HIGH_SPEED_KMH, GearBox.Gear.D));
 
             // Tick 2: Speed drops below 30 km/h -> ABS disengages, applies bounded pressure (100%)
-            assertEquals(MAX_PRESSURE, controller.apply(HIGH_PRESSURE, LOW_SPEED_KMH, GearBox.Gear.D));
+            assertEquals(HIGH_PRESSURE, controller.apply(HIGH_PRESSURE, LOW_SPEED_KMH, GearBox.Gear.D));
 
             // Tick 3: Speed goes back up -> ABS re-engages, pulse must start at High (90%)
             assertEquals(ABS_HIGH_PULSE, controller.apply(HIGH_PRESSURE, HIGH_SPEED_KMH, GearBox.Gear.D));

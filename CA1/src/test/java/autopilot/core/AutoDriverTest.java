@@ -368,5 +368,24 @@ class AutoDriverTest {
                     () -> assertFalse(result.warningActive())
             );
         }
+
+        @Test
+        @DisplayName("Sensor failure in PARK must enter Safe Mode without PARK braking exception")
+        void shouldEnterSafeModeWithoutIllegalStateException_whenSensorsFailInParkGear() {
+            ObstacleSensor failingObstacle = () -> {
+                throw new SensorFailureException("obstacle sensor failure");
+            };
+            AutoDriver driver = new AutoDriver(operationalSpeedSensor, failingObstacle,
+                    operationalLaneSensor, TARGET_SPEED_KMH);
+
+            AutoDriver.DriveResult result = assertDoesNotThrow(() -> driver.tick(GearBox.Gear.P));
+
+            assertAll(
+                    () -> assertTrue(result.safeMode()),
+                    () -> assertEquals(SAFE_MODE_BRAKE_PRESSURE, result.brakePressure()),
+                    () -> assertEquals(AdaptiveCruise.Mode.BRAKE, result.cruiseMode()),
+                    () -> assertFalse(result.warningActive())
+            );
+        }
     }
 }

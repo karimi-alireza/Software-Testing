@@ -121,6 +121,31 @@ class AdaptiveCruiseTest {
     @DisplayName("Hysteresis and State Transition Dynamics Tests")
     class HysteresisTransitionTests {
 
+        @Test
+        @DisplayName("Exact safe distance without prior braking should hold with zero amount")
+        void shouldHoldAtExactSafeDistance_withoutPriorBrakingState() {
+            AdaptiveCruise.Decision decision = cruise.update(100.0, 50.0);
+
+            assertAll(
+                    () -> assertEquals(AdaptiveCruise.Mode.HOLD, decision.mode()),
+                    () -> assertEquals(0.0, decision.amount(), DOUBLE_EPSILON)
+            );
+        }
+
+        @Test
+        @DisplayName("Zero speed and zero distance should safely request emergency braking")
+        void shouldHandleZeroSpeedAndZeroDistanceSafely() {
+            AdaptiveCruise zeroSpeedCruise = new AdaptiveCruise(50.0);
+
+            AdaptiveCruise.Decision decision = zeroSpeedCruise.update(0.0, 0.0);
+
+            assertAll(
+                    () -> assertEquals(0.0, zeroSpeedCruise.safeDistanceFor(0.0), DOUBLE_EPSILON),
+                    () -> assertEquals(AdaptiveCruise.Mode.EMERGENCY_BRAKE, decision.mode()),
+                    () -> assertEquals(EMERGENCY_BRAKE_PRESSURE, decision.amount(), DOUBLE_EPSILON)
+            );
+        }
+
         @ParameterizedTest(name = "At speed {0}, distance {1} should produce {2}")
         @CsvSource({
                 "100.0, 25.0, EMERGENCY_BRAKE",
