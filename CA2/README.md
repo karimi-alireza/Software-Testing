@@ -29,6 +29,21 @@ preparation) throws `FlightException`.
 - `NavigationSystem.setRouteAvailable(...)` can change route availability.
 - Mockito and JUnit 5 dependencies are already configured with test scope in `pom.xml`.
 
+## Run the console demo
+
+From this folder, with Java 17+ and Maven installed:
+
+```sh
+mvn -q compile
+java --class-path target/classes scripts/FlightDemo.java
+```
+
+The demo runs the actual simulator with real components and prints the aircraft
+status, engine state, gear state and remaining fuel. It shows a normal flight,
+an engine failure, and insufficient fuel followed by emergency landing. This is
+a console program; the project has no graphical interface. The application JAR
+has no `Main-Class`, so use the command above to launch the demo.
+
 ## Completed CA2 test suite
 
 Requires Java 17+ and Maven. From this folder:
