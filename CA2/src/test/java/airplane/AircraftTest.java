@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.InOrder;
@@ -103,7 +102,9 @@ class AircraftTest {
 
         assertSame(failure, thrown.getCause());
         assertEquals(FlightStatus.ABORTED, aircraft.getStatus());
-        verifyNoInteractions(gear);
+        verify(gear, never()).retract();
+        verify(gear).deploy();
+        verify(engine).stop();
     }
 
     @Test
@@ -117,6 +118,8 @@ class AircraftTest {
         assertSame(failure, thrown.getCause());
         assertEquals(FlightStatus.ABORTED, aircraft.getStatus());
         verify(engine).start();
+        verify(gear).deploy();
+        verify(engine).stop();
     }
 
     @ParameterizedTest(name = "cruise consumes {0} fuel")
@@ -132,8 +135,9 @@ class AircraftTest {
         verify(engine, never()).stop();
     }
 
-    @ParameterizedTest(name = "reject nonpositive cruise amount {0}")
-    @ValueSource(doubles = {-1.0, -Double.MIN_VALUE, -0.0, 0.0})
+    @ParameterizedTest(name = "reject invalid cruise amount {0}")
+    @ValueSource(doubles = {-1.0, -Double.MIN_VALUE, -0.0, 0.0,
+            Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY})
     void invalidCruiseAmountDoesNotConsumeFuelOrLand(double amount) {
         startFlight();
 
@@ -213,18 +217,18 @@ class AircraftTest {
     }
 
     @Test
-    void failedEngineQueryDuringCruisePropagatesWithoutConsumingFuel() {
+    void failedEngineQueryDuringCruiseLandsAndPreservesCauseWithoutConsumingFuel() {
         startFlight();
         RuntimeException failure = new IllegalStateException("engine sensor failure");
         when(engine.isOperational()).thenThrow(failure);
 
-        assertSame(failure, assertThrows(IllegalStateException.class, () -> aircraft.cruise(5.0)));
+        FlightException thrown = assertThrows(FlightException.class, () -> aircraft.cruise(5.0));
 
-        // Characterization: an exceptional sensor reading has no recovery policy.
-        assertEquals(FlightStatus.IN_FLIGHT, aircraft.getStatus());
+        assertSame(failure, thrown.getCause());
+        assertEquals(FlightStatus.LANDED, aircraft.getStatus());
         verify(fuel, never()).consumeFuel(any(Double.class));
-        verify(gear, never()).deploy();
-        verify(engine, never()).stop();
+        verify(gear).deploy();
+        verify(engine).stop();
     }
 
     @Test
@@ -259,7 +263,7 @@ class AircraftTest {
         assertSame(failure, assertThrows(IllegalStateException.class, aircraft::land));
 
         assertEquals(FlightStatus.IN_FLIGHT, aircraft.getStatus());
-        verify(engine, never()).stop();
+        verify(engine).stop();
     }
 
     @Test
@@ -274,29 +278,24 @@ class AircraftTest {
         verify(gear).deploy();
     }
 
-    enum EmergencyTrigger { ENGINE_FAILURE, FUEL_FAILURE }
-
-    @ParameterizedTest(name = "{0}: emergency gear deployment fails")
-    @EnumSource(EmergencyTrigger.class)
-    void emergencyGearFailurePropagatesWithoutReportingSuccessfulLanding(EmergencyTrigger trigger) {
+    @Test
+    void emergencyGearFailureStillStopsEngineWithoutReportingSuccessfulLanding() {
         startFlight();
-        triggerEmergencyOnNextCruise(trigger);
+        when(engine.isOperational()).thenReturn(false);
         RuntimeException landingFailure = new IllegalStateException("emergency gear jammed");
         doThrow(landingFailure).when(gear).deploy();
 
         assertSame(landingFailure, assertThrows(IllegalStateException.class, () -> aircraft.cruise(5.0)));
 
-        // Characterization: recovery failure interrupts the original failure handling.
         assertEquals(FlightStatus.IN_FLIGHT, aircraft.getStatus());
         verify(gear, times(1)).deploy();
-        verify(engine, never()).stop();
+        verify(engine, times(1)).stop();
     }
 
-    @ParameterizedTest(name = "{0}: emergency engine shutdown fails")
-    @EnumSource(EmergencyTrigger.class)
-    void emergencyShutdownFailurePropagatesWithoutReportingSuccessfulLanding(EmergencyTrigger trigger) {
+    @Test
+    void emergencyShutdownFailurePropagatesWithoutReportingSuccessfulLanding() {
         startFlight();
-        triggerEmergencyOnNextCruise(trigger);
+        when(engine.isOperational()).thenReturn(false);
         RuntimeException landingFailure = new IllegalStateException("emergency shutdown failed");
         doThrow(landingFailure).when(engine).stop();
 
@@ -360,14 +359,6 @@ class AircraftTest {
         assertEquals(FlightStatus.LANDED, aircraft.getStatus());
         verify(engine, times(1)).start();
         verify(gear, times(1)).retract();
-    }
-
-    private void triggerEmergencyOnNextCruise(EmergencyTrigger trigger) {
-        switch (trigger) {
-            case ENGINE_FAILURE -> when(engine.isOperational()).thenReturn(false);
-            case FUEL_FAILURE -> doThrow(new IllegalStateException("fuel pump failure"))
-                    .when(fuel).consumeFuel(5.0);
-        }
     }
 
     private void allowPreparation() {

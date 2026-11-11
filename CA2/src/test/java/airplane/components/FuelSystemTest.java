@@ -18,9 +18,22 @@ class FuelSystemTest {
     }
 
     @ParameterizedTest(name = "reject fuel values {0}, {1}")
-    @CsvSource({"-0.01, 20", "100, -0.01", "-0.01, -0.01"})
+    @CsvSource({"-0.01, 20", "100, -0.01", "-0.01, -0.01",
+            "-4.9E-324, 20", "100, -4.9E-324", "-0.0001, 20", "100, -0.0001"})
     void constructorRejectsNegativeFuelValues(double initial, double minimum) {
         assertThrows(IllegalArgumentException.class, () -> new FuelSystem(initial, minimum));
+    }
+
+    @ParameterizedTest(name = "reject non-finite initial fuel {0}")
+    @ValueSource(doubles = {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY})
+    void constructorRejectsNonFiniteInitialFuel(double initial) {
+        assertThrows(IllegalArgumentException.class, () -> new FuelSystem(initial, 20.0));
+    }
+
+    @ParameterizedTest(name = "reject non-finite minimum fuel {0}")
+    @ValueSource(doubles = {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY})
+    void constructorRejectsNonFiniteMinimumFuel(double minimum) {
+        assertThrows(IllegalArgumentException.class, () -> new FuelSystem(100.0, minimum));
     }
 
     @ParameterizedTest(name = "consume {0}, remaining {1}")
@@ -33,9 +46,10 @@ class FuelSystemTest {
         assertEquals(expected, fuel.getRemainingFuel(), 1.0e-10);
     }
 
-    @ParameterizedTest(name = "reject nonpositive fuel amount {0}")
-    @ValueSource(doubles = {-1.0, -Double.MIN_VALUE, -0.0, 0.0})
-    void nonpositiveConsumptionPreservesFuel(double amount) {
+    @ParameterizedTest(name = "reject invalid fuel amount {0}")
+    @ValueSource(doubles = {-1.0, -Double.MIN_VALUE, -0.0, 0.0,
+            Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY})
+    void invalidConsumptionPreservesFuel(double amount) {
         FuelSystem fuel = new FuelSystem(20.0, 10.0);
 
         assertThrows(IllegalArgumentException.class, () -> fuel.consumeFuel(amount));

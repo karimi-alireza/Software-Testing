@@ -1,12 +1,14 @@
 # Submission handoff
 
 These actions come from page 3 of SWT-05-CA2.pdf. Local implementation and test
-execution do not publish a repository or submit coursework. No Git repository
-was present in the supplied folder, and no repository was created or published
-by this work.
+execution do not publish a repository or submit coursework. `HW/2/CA2` is the
+updated working folder. A sibling Git repository exists at `Software-Testing`;
+its earlier CA2 commit predates the validation/recovery fixes. Copy the reviewed
+contents of this folder into the submission repository before creating the new
+final commit. Remote push, visibility and eLearn delivery need independent checks.
 
 - [ ] Confirm the required two-person team and ensure both members can explain the tests.
-- [ ] Create a private repository containing this completed project, or use the course's upstream fork workflow. Upstream link from the PDF: <https://github.com/UT-SWT/F05-CA2>.
+- [ ] Update the existing submission repository with this completed project, or use the course's upstream fork workflow. Upstream link from the PDF: <https://github.com/UT-SWT/F05-CA2>.
 - [ ] Keep the repository **Private through the end of ۱۴۰۵/۰۸/۲۳**; make it **Public afterward** so the teaching assistants can inspect it. Use course announcements for the exact submission time; the PDF does not specify a clock time or timezone.
 - [ ] Run `mvn clean verify` from the repository root. Confirm zero failed/error/skipped tests. Review `docs/VERIFICATION.md` and generated coverage.
 - [ ] Commit the finished source, tests, scripts, `pom.xml`, and documentation **before the submission deadline**. Exclude `target/` and local IDE files (already in `.gitignore`).

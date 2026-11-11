@@ -24,6 +24,10 @@ class EngineTest {
         Engine engine = new Engine(false);
         assertThrows(IllegalStateException.class, engine::start);
         assertFalse(engine.isRunning());
+        assertFalse(engine.isOperational(), "a rejected start must not repair the engine");
+        assertThrows(IllegalStateException.class, engine::start);
+        assertFalse(engine.isRunning());
+        assertFalse(engine.isOperational());
     }
 
     @Test
@@ -43,5 +47,10 @@ class EngineTest {
         assertFalse(engine.isRunning());
         assertFalse(engine.isOperational());
         assertThrows(IllegalStateException.class, engine::start);
+        assertFalse(engine.isOperational(), "failure must persist after a rejected restart");
+        assertFalse(engine.isRunning());
+        assertThrows(IllegalStateException.class, engine::start);
+        assertFalse(engine.isOperational());
+        assertFalse(engine.isRunning());
     }
 }

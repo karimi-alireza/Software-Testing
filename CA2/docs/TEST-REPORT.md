@@ -9,7 +9,7 @@ answer the oral assessment themselves.
 
 The test strategy applies these local course materials:
 
-- [Assignment](../../SWT-05-CA2.pdf), pp. 1-3: learning objective, two engine questions, nine Mockito concepts, submission rules.
+- [Assignment](../SWT-05-CA2.pdf), pp. 1-3: learning objective, two engine questions, nine Mockito concepts, submission rules.
 - [Effective test design](../../../../Slides/05-Principles-of-Effective-Test-Design.pdf), pp. 3, 8, 10-15, 18, 20, 22, 24-28: traceability, risk, simple cases, partitions, boundaries, state transitions, independence, positive/negative testing, review, clear oracles.
 - [Automation principles](../../../../Slides/06-Principals%20of%20Test%20Automation.pdf), pp. 4-7, 11-12: self-checking tests, front-door access, isolate dependencies, keep test logic out of production, avoid replacing the SUT.
 - [xUnit/JUnit](../../../../Slides/07-xUnit-Junit.pdf), pp. 3-6: direct/indirect control and observation points, fixture strategy.
@@ -48,8 +48,9 @@ A **stub** supplies controlled return values or exceptions. A **mock** is used t
 verify expected outgoing calls. Mockito calls generated doubles “mocks”, but the
 role depends on how a test uses them. The same generated engine can provide
 stubbed sensor readings and record start/stop calls. A **dummy** merely fills an
-unused parameter; a **fake** is a simplified working implementation; a **spy**
-records/delegates to a real object unless stubbed. These tests do not need spies,
+unused parameter; a **fake** is a simplified working implementation. A general
+**Test Spy** records calls so tests can inspect indirect outputs. Mockito's
+specific `spy()` additionally delegates unstubbed calls to a real object. These tests do not need spies,
 handwritten fakes, reflection, static mocking, or a mock of `Aircraft`.
 
 ## Risk and systematic case selection
@@ -59,8 +60,10 @@ losing/reporting fuel incorrectly, and accepting illegal lifecycle operations.
 Those receive decision-table, state-transition, boundary, and failure-injection
 tests. Small gear/navigation state tests are cheaper and lower priority. Tests
 were designed from README behavior, the assignment's interaction objective, and
-the public component contracts before the first suite run. Observed unspecified
-exception behavior is labeled characterization in the traceability matrix.
+the public component contracts. The follow-up assessment authorized explicit
+finite-input and recovery policies; those are labeled separately from the
+original assignment requirements in the traceability matrix. Preparation-query
+propagation still characterizes the supplied behavior.
 
 Preparation uses four representative decisions, sufficient to isolate each
 condition's effect. Later queries are deliberately unstubbed when an earlier
@@ -93,12 +96,15 @@ changes to status, fuel, engine running state and gear deployment.
 
 Fuel input partitions and boundary representatives include:
 
-- Negative constructor values; zero initial/minimum fuel; threshold 19.99 / 20 / 20.01.
+- Negative constructor values, including the immediate neighbor below zero in
+  each argument; zero initial/minimum fuel; threshold 19.99 / 20 / 20.01.
 - Negative, smallest negative magnitude, signed zero, zero, smallest positive
   `double`, ordinary positive and fractional cruise values.
 - Consumption just below, exactly at, and one representable value above the
   remaining fuel (`Math.nextUp(20.0)`). Failed consumption must preserve fuel.
 - Null, empty and whitespace-only destinations; absent constructor dependencies.
+- NaN and both infinities at initial-fuel, minimum-fuel, consumption and cruise
+  boundaries; invalid consumption/cruise must preserve real state.
 
 This deliberately samples continuous numeric inputs. Enumerating the tiny finite
 state table is practical; enumerating every numeric value or every sequence of
@@ -107,7 +113,7 @@ is needed to isolate the three preconditions.
 
 ## Fixture and assertion design
 
-`AircraftTest` and `AircraftIntegrationTest` use `@BeforeEach` to construct fresh,
+`AircraftTest`, `AircraftRecoveryTest` and `AircraftIntegrationTest` use `@BeforeEach` to construct fresh,
 transient objects. Small component tests use local inline setup. Helpers such as
 `prepareAircraft`, `startFlight`, and `assertLandedSafely` name reusable setup and
 one cohesive landing outcome. There is no mutable static fixture or dependency
@@ -128,7 +134,8 @@ commands instead. Exceptions use `assertThrows`; wrapping tests compare the
 actual cause with `assertSame`. Exact error wording is not frozen, except that
 invalid-lifecycle diagnostics must identify the current state. Decimal fuel
 subtraction uses a small explicit tolerance, rather than a fragile exact decimal
-comparison. No production code or testing branch was introduced to pass tests.
+comparison. The production fixes implement actual validation/recovery behavior;
+there are no test-only branches or replacements of the aircraft under test.
 
 `doNothing()` is normally redundant for a void method on a mock. It appears
 explicitly because the assignment requires it. `thenThrow()` handles a value-returning
@@ -144,53 +151,62 @@ are restubbed and the second start is verified once. It does not change the real
 aircraft's `LANDED` state. Without reset that call count would be two. Reset is
 not used to conceal calls or to establish dependencies between tests.
 
-## Review, detected gaps, and limits
+## Review fixes and recovery contract
 
-See `DOMAIN-REVIEW.md` for the second review and added scenarios.
-See `VERIFICATION.md` for measured results, randomized ordering, and temporary
-fault experiments. Full structural coverage is a useful check against missed
-branches; it does not prove all requirements or numeric inputs are correct. The
-eight representative faults show assertion sensitivity, not a universal mutation
-score. Peer review by the two actual team members and the oral assessment remain
-outside this automated check.
+The 2026-11-10 assessment found three faults that escaped the original 103-case
+suite: accepting a tiny negative initial fuel, accepting a tiny negative minimum,
+and silently repairing a failed engine during a rejected start. Constructor tests
+now include the immediate negative neighbor of zero for each argument. Engine
+tests assert nonoperational/stopped state after rejected starts and reject another
+retry. The sensitivity script now includes these three formerly surviving faults.
 
-**D1: non-finite fuel values are accepted.** IEEE-754 comparisons with `NaN` are
-false, so the starter's `< 0` / `<= 0` checks do not reject it. Reproduction:
+Following the user's request to fix all identified weaknesses, the production
+contract was extended explicitly. These policies address real simulator defects;
+they are documented additions rather than claims about extra original PDF rules.
 
-```sh
-mvn test
-java --class-path target/classes scripts/NonFiniteFuelProbe.java
-```
+**Numeric validation:** both constructor fuel values must be finite and
+nonnegative; consumption and cruise amounts must be finite and positive. NaN and
+both infinities throw `IllegalArgumentException` before fuel/component mutations.
+The independent checker now reports 12 passed / 0 failed; the former-corruption
+probe verifies four formerly failing examples. Equivalent cases run in Maven.
 
-Observed: `consumeFuel(NaN)` changes remaining fuel to `NaN`; `NaN` constructor
-fuel is accepted; infinity minus infinity also produces `NaN`; `cruise(NaN)`
-leaves the aircraft `IN_FLIGHT` with unusable fuel state. Expected robustness
-policy would reject non-finite values with `IllegalArgumentException` and leave
-state/fuel unchanged. The assignment does not spell out this policy. The finite
-regression suite does not assert that accepting NaN is correct, and no test is
-disabled to hide a failure. The probe intentionally exposes the unresolved gap. A separate checker,
-`java --class-path target/classes scripts/CheckFiniteFuelContract.java`, tests the
-proposed rejection contract for NaN and both infinities at all four fuel input
-boundaries. It reports 4 passes and 8 failures and exits 1. It is not included in
-the passing Maven case count; no finite-only validation requirement is invented
-on behalf of the assignment.
-A future production fix should specify finite values, use `Double.isFinite` on
-constructor/consumption/cruise inputs, and add corresponding regression cases.
+**Aborted takeoff:** startup/retraction failures set `ABORTED`, then attempt gear
+deployment and engine shutdown. These cleanup commands also handle collaborators
+that changed state before throwing. The original failure is the cause of the
+`FlightException`; cleanup failures are retained as suppressed exceptions.
 
-**D2: landing and takeoff failures have limited recovery.** If gear deployment
-throws, shutdown is not attempted; if engine stop throws, the gear is already
-deployed but status remains `IN_FLIGHT`. Two characterization tests expose these
-partial outcomes and prevent claiming `LANDED` after a failed landing.
-Four additional cases inject gear/shutdown failure while already responding to
-engine/fuel failure. The recovery exception propagates; on the fuel path it masks
-the original fuel exception, so the advertised wrapped-cause behavior is not
-maintained when recovery itself fails. A separate cruise-query test records that
-an exceptional engine reading, unlike a false reading, does not trigger landing. If gear
-retraction fails after engine startup, status becomes `ABORTED` but the engine
-is not stopped by the supplied implementation. No rollback or redundant recovery
-is specified in the assignment. These are simulator limitations requiring an
-explicit recovery policy, not proof of real aviation safety. The production
-sources were retained, following the course instruction to test the real SUT.
+**Landing and emergency recovery:** deployment is attempted before shutdown;
+shutdown is attempted even when deployment throws. `LANDED` is assigned only when
+both commands succeed. Otherwise the existing `IN_FLIGHT` state remains, so the
+API does not falsely claim a completed landing and permits another landing
+attempt. If both commands fail, deployment is the primary recovery exception and
+shutdown is suppressed beneath it. Direct landing calls propagate this recovery
+exception; they have no earlier initiating exception to preserve.
+
+**Cruise failures:** a false engine reading still requests emergency landing
+without consuming fuel. An engine-query exception now also requests emergency
+landing, then throws `FlightException` with the query exception as its cause. A
+fuel exception follows the same recovery/preservation pattern. If recovery fails,
+the initiating fuel/query exception stays primary and receives the recovery
+failure as a suppressed exception. Exception identity checks prevent Java's
+self-suppression error when a collaborator reuses an exception instance.
+
+`AircraftRecoveryTest` covers fuel/query failures combined with each recovery
+failure, both recovery commands failing, aborted-start cleanup, and reused
+exception objects. Real-component integration tests demonstrate restored gear,
+stopped engines after partial failures, no fuel corruption, and successful retry
+after a transient deployment failure. Older characterization assertions that
+required skipping shutdown or masking the original exception were replaced with
+these explicit regression requirements. Preparation-query exceptions still
+propagate unchanged before readiness changes.
+
+See `DOMAIN-REVIEW.md` for traceability and `VERIFICATION.md` for measured results.
+The sensitivity experiments are targeted checks, not an exhaustive mutation
+score. The finite model cannot guarantee successful landing if hardware commands
+continue throwing; it can attempt both actions and retain all failure information.
+Refueling, repair, physical certification, concurrency and additional route/fuel
+checks at takeoff are outside the specified model. The two real team members
+still need to review the work and complete the oral/external submission steps.
 
 ## Oral-assessment practice
 
@@ -215,8 +231,8 @@ sources were retained, following the course instruction to test the real SUT.
 8. **Why not mock the aircraft or force its private status?** That would replace or
    bypass the behavior being tested. Public operations reach each starting state.
 9. **What do 100% coverage and green tests not prove?** Requirements completeness,
-   all numeric domains, realistic hardware recovery, or production safety. D1/D2
-   are concrete counterexamples.
+   all numeric domains, realistic hardware recovery, or production safety. The
+   three originally surviving faults demonstrate why assertion quality matters.
 10. **What remains for submission?** Team review, private repository, timing the
     visibility change, committing/pushing, and submitting URL/hash as listed in
     `SUBMISSION.md`.

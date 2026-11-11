@@ -5,8 +5,9 @@ public class FuelSystem {
     private final double minimumTakeoffFuel;
 
     public FuelSystem(double initialFuel, double minimumTakeoffFuel) {
-        if (initialFuel < 0 || minimumTakeoffFuel < 0) {
-            throw new IllegalArgumentException("Fuel values cannot be negative.");
+        if (!Double.isFinite(initialFuel) || !Double.isFinite(minimumTakeoffFuel)
+                || initialFuel < 0 || minimumTakeoffFuel < 0) {
+            throw new IllegalArgumentException("Fuel values must be finite and nonnegative.");
         }
         this.remainingFuel = initialFuel;
         this.minimumTakeoffFuel = minimumTakeoffFuel;
@@ -17,8 +18,8 @@ public class FuelSystem {
     }
 
     public void consumeFuel(double amount) {
-        if (amount <= 0) {
-            throw new IllegalArgumentException("Fuel amount must be greater than zero.");
+        if (!Double.isFinite(amount) || amount <= 0) {
+            throw new IllegalArgumentException("Fuel amount must be finite and greater than zero.");
         }
         if (amount > remainingFuel) {
             throw new IllegalStateException("Not enough fuel.");

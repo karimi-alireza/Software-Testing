@@ -6,9 +6,8 @@ import airplane.components.NavigationSystem;
 import airplane.models.FlightStatus;
 
 /**
- * Checks a proposed finite-only fuel contract against the unchanged starter.
- * This policy is not explicit in the assignment. Failures are reported openly;
- * this diagnostic is not part of the specified finite-input regression suite.
+ * Independently checks the finite-only fuel contract adopted after the review.
+ * All twelve scenarios are also represented in the normal Maven regression suite.
  * Run: java --class-path target/classes scripts/CheckFiniteFuelContract.java
  * Exits 1 if any check fails; exits 0 only if every check passes.
  */

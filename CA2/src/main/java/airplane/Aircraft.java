@@ -56,6 +56,7 @@ public class Aircraft {
             status = FlightStatus.IN_FLIGHT;
         } catch (RuntimeException exception) {
             status = FlightStatus.ABORTED;
+            recoverAfterFailure(exception, this::deployGearAndStopEngine);
             throw new FlightException("Takeoff failed.", exception);
         }
     }
@@ -63,11 +64,18 @@ public class Aircraft {
     public void cruise(double fuelAmount) {
         ensureStatusIs(FlightStatus.IN_FLIGHT);
 
-        if (fuelAmount <= 0) {
-            throw new IllegalArgumentException("Fuel amount must be greater than zero.");
+        if (!Double.isFinite(fuelAmount) || fuelAmount <= 0) {
+            throw new IllegalArgumentException("Fuel amount must be finite and greater than zero.");
         }
 
-        if (!engine.isOperational()) {
+        boolean operational;
+        try {
+            operational = engine.isOperational();
+        } catch (RuntimeException exception) {
+            recoverAfterFailure(exception, this::emergencyLand);
+            throw new FlightException("Cannot read engine status.", exception);
+        }
+        if (!operational) {
             emergencyLand();
             return;
         }
@@ -75,7 +83,7 @@ public class Aircraft {
         try {
             fuelSystem.consumeFuel(fuelAmount);
         } catch (RuntimeException exception) {
-            emergencyLand();
+            recoverAfterFailure(exception, this::emergencyLand);
             throw new FlightException("A problem occurred while consuming fuel.", exception);
         }
     }
@@ -91,9 +99,45 @@ public class Aircraft {
     }
 
     private void completeLanding() {
-        landingGear.deploy();
-        engine.stop();
+        deployGearAndStopEngine();
         status = FlightStatus.LANDED;
+    }
+
+    /** Both recovery commands are attempted; a failed command cannot report a completed landing. */
+    private void deployGearAndStopEngine() {
+        RuntimeException failure = null;
+        try {
+            landingGear.deploy();
+        } catch (RuntimeException exception) {
+            failure = exception;
+        }
+        try {
+            engine.stop();
+        } catch (RuntimeException exception) {
+            if (failure == null) {
+                failure = exception;
+            } else {
+                addSuppressedIfDifferent(failure, exception);
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    private void recoverAfterFailure(RuntimeException failure, Runnable recovery) {
+        try {
+            recovery.run();
+        } catch (RuntimeException recoveryFailure) {
+            addSuppressedIfDifferent(failure, recoveryFailure);
+        }
+    }
+
+    private void addSuppressedIfDifferent(RuntimeException failure, RuntimeException additionalFailure) {
+        // A collaborator may throw the same instance twice; Java forbids self-suppression.
+        if (failure != additionalFailure) {
+            failure.addSuppressed(additionalFailure);
+        }
     }
 
     private void ensureStatusIs(FlightStatus... allowedStatuses) {

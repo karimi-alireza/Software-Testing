@@ -5,6 +5,8 @@ import airplane.exceptions.FlightException;
 import airplane.models.FlightStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -152,6 +154,112 @@ class AircraftIntegrationTest {
 
         assertLandedSafely();
         assertFalse(engine.isOperational());
+    }
+
+    @ParameterizedTest(name = "reject non-finite cruise {0} without changing real components")
+    @ValueSource(doubles = {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY})
+    void nonFiniteCruisePreservesRealFlightState(double amount) {
+        startFlight();
+
+        assertThrows(IllegalArgumentException.class, () -> aircraft.cruise(amount));
+
+        assertEquals(100.0, fuel.getRemainingFuel());
+        assertEquals(FlightStatus.IN_FLIGHT, aircraft.getStatus());
+        assertTrue(engine.isRunning());
+        assertFalse(gear.isDeployed());
+    }
+
+    @Test
+    void partialGearRetractionFailureRestoresGearAndStopsRealEngine() {
+        RuntimeException failure = new IllegalStateException("retraction failed after moving gear");
+        LandingGear failingGear = new LandingGear() {
+            @Override
+            public void retract() {
+                super.retract();
+                throw failure;
+            }
+        };
+        Aircraft recovering = new Aircraft(engine, fuel, failingGear, navigation);
+        recovering.prepareForTakeoff();
+
+        FlightException thrown = assertThrows(FlightException.class, recovering::takeOff);
+
+        assertSame(failure, thrown.getCause());
+        assertEquals(FlightStatus.ABORTED, recovering.getStatus());
+        assertFalse(engine.isRunning());
+        assertTrue(failingGear.isDeployed());
+        assertEquals(100.0, fuel.getRemainingFuel());
+    }
+
+    @Test
+    void partialEngineStartFailureStillStopsRealEngine() {
+        Engine failingEngine = new Engine() {
+            @Override
+            public void start() {
+                super.start();
+                throw new IllegalStateException("startup failed after engine began running");
+            }
+        };
+        Aircraft recovering = new Aircraft(failingEngine, fuel, gear, navigation);
+        recovering.prepareForTakeoff();
+
+        assertThrows(FlightException.class, recovering::takeOff);
+
+        assertEquals(FlightStatus.ABORTED, recovering.getStatus());
+        assertFalse(failingEngine.isRunning());
+        assertTrue(gear.isDeployed());
+    }
+
+    @Test
+    void failedGearDeploymentStillStopsRealEngineAndCanBeRetried() {
+        LandingGear failingOnce = new LandingGear() {
+            private boolean firstDeployment = true;
+            @Override
+            public void deploy() {
+                if (firstDeployment) {
+                    firstDeployment = false;
+                    throw new IllegalStateException("temporary deployment failure");
+                }
+                super.deploy();
+            }
+        };
+        Aircraft recovering = new Aircraft(engine, fuel, failingOnce, navigation);
+        recovering.prepareForTakeoff();
+        assertDoesNotThrow(recovering::takeOff, "fixture must reach flight before deployment can fail");
+
+        assertThrows(IllegalStateException.class, recovering::land);
+
+        assertFalse(engine.isRunning());
+        assertFalse(failingOnce.isDeployed());
+        assertEquals(FlightStatus.IN_FLIGHT, recovering.getStatus());
+        recovering.emergencyLand();
+        assertTrue(failingOnce.isDeployed());
+        assertFalse(engine.isRunning());
+        assertEquals(FlightStatus.LANDED, recovering.getStatus());
+    }
+
+    @Test
+    void engineQueryFailureStopsRealEngineAndPreservesFuel() {
+        Engine failingQuery = new Engine() {
+            @Override
+            public boolean isOperational() {
+                if (isRunning()) {
+                    throw new IllegalStateException("engine sensor failed during flight");
+                }
+                return super.isOperational();
+            }
+        };
+        Aircraft recovering = new Aircraft(failingQuery, fuel, gear, navigation);
+        recovering.prepareForTakeoff();
+        recovering.takeOff();
+
+        FlightException thrown = assertThrows(FlightException.class, () -> recovering.cruise(5.0));
+
+        assertInstanceOf(IllegalStateException.class, thrown.getCause());
+        assertFalse(failingQuery.isRunning());
+        assertTrue(gear.isDeployed());
+        assertEquals(100.0, fuel.getRemainingFuel());
+        assertEquals(FlightStatus.LANDED, recovering.getStatus());
     }
 
     private void startFlight() {
